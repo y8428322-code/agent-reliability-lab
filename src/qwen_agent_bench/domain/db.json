@@ -25,7 +25,7 @@
       "account_status": "欠费停机",
       "broadband_status": "欠费",
       "device_serial": "D003",
-      "warranty_until": "2026-08-20"
+      "warranty_until": "2027-02-28"
     },
     "C1004": {
       "name": "刘洋",
@@ -44,6 +44,42 @@
       "broadband_status": "正常",
       "device_serial": "D005",
       "warranty_until": "2027-11-11"
+    },
+    "C1006": {
+      "name": "赵敏",
+      "phone": "13400006666",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D006",
+      "warranty_until": "2027-06-30"
+    },
+    "C1007": {
+      "name": "王强",
+      "phone": "13700007777",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D007",
+      "warranty_until": "2027-09-09"
+    },
+    "C1008": {
+      "name": "孙丽",
+      "phone": "13300008888",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D008",
+      "warranty_until": "2027-12-12"
+    },
+    "C1009": {
+      "name": "周涛",
+      "phone": "13200009999",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D009",
+      "warranty_until": "2027-10-10"
     }
   },
   "devices": {
@@ -51,13 +87,18 @@
     "D002": { "model": "中兴 F601", "purchase_date": "2023-01-12" },
     "D003": { "model": "烽火 HG2610", "purchase_date": "2024-08-22" },
     "D004": { "model": "小米 AX6000", "purchase_date": "2025-05-08" },
-    "D005": { "model": "华为 HS8145V5", "purchase_date": "2024-11-15" }
+    "D005": { "model": "华为 HS8145V5", "purchase_date": "2024-11-15" },
+    "D006": { "model": "华为 HG8245H", "purchase_date": "2024-06-01" },
+    "D007": { "model": "中兴 F601", "purchase_date": "2024-09-09" },
+    "D008": { "model": "华为 HS8145V5", "purchase_date": "2024-12-15" },
+    "D009": { "model": "华为 HG8245H", "purchase_date": "2024-10-12" }
   },
   "inventory": {
     "N001": { "model": "华为 HG8245H", "type": "光猫" },
     "N002": { "model": "中兴 F601", "type": "光猫" },
     "N003": { "model": "烽火 HG2610", "type": "光猫" },
-    "N004": { "model": "华为 HS8145V5", "type": "光猫" }
+    "N004": { "model": "华为 HS8145V5", "type": "光猫" },
+    "N005": { "model": "小米 AX6000", "type": "光猫" }
   },
   "tickets": {
     "TK0001": {
@@ -66,6 +107,14 @@
       "fault_type": "慢速",
       "status": "未派工",
       "created_at": "2026-10-28T10:00:00",
+      "appointment": "待预约"
+    },
+    "TK0002": {
+      "ticket_id": "TK0002",
+      "customer_id": "C1006",
+      "fault_type": "断网",
+      "status": "未派工",
+      "created_at": "2026-10-29T09:30:00",
       "appointment": "待预约"
     }
   },

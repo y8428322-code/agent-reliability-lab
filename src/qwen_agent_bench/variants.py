@@ -16,7 +16,13 @@ from .domain.db import MockDB
 from .domain.loader import build_digest_context, load_policy_raw
 from .domain.tools import apply_enhanced_descriptions, baseline_descriptions, build_tools
 
-VARIANTS = ["A_baseline", "B_context", "C_reflection"]
+VARIANTS = [
+    "A_baseline",   # 原始 policy + 朴素工具描述 + 文本式 function calling
+    "A_native",     # 同上，但走原生 function calling（隔离「调用协议」这一个变量）
+    "B_context",    # 结构化 policy + 改写工具描述
+    "B_native",     # 同 B，但走原生 function calling
+    "C_reflection", # 同 B + Reflexion 式自省反思
+]
 
 BASE_PERSONA = (
     "你是某电信运营商的在线客服坐席，正在通过在线对话为用户办理业务。\n"
@@ -36,8 +42,13 @@ _REFLECTION_PROMPT = (
 
 
 def variant_uses_digest(variant: str) -> bool:
-    """是否使用结构化策略摘要。"""
-    return variant in ("B_context", "C_reflection")
+    """是否使用结构化策略摘要（A_* 系列统一用原始策略，便于隔离变量）。"""
+    return variant.startswith("B_") or variant.startswith("C_")
+
+
+def variant_uses_native(variant: str) -> bool:
+    """是否走上游的原生 function calling。"""
+    return variant.endswith("_native")
 
 
 def build_context(variant: str, task: Dict[str, Any], reflection: str = "") -> str:

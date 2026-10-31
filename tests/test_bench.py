@@ -47,10 +47,11 @@ class DbTest(unittest.TestCase):
 
     def test_ticket_id_is_deterministic(self):
         db = MockDB()
+        base = len(db.tickets)
         first = db.create_ticket("C1001", "断网")
         second = db.create_ticket("C1002", "慢速")
-        self.assertEqual(first, "TK0002")
-        self.assertEqual(second, "TK0003")
+        self.assertEqual(first, "TK%04d" % (base + 1))
+        self.assertEqual(second, "TK%04d" % (base + 2))
 
     def test_refund_amount_normalized_to_float(self):
         db = MockDB()
@@ -116,9 +117,9 @@ class ToolTest(unittest.TestCase):
 
     def test_cancel_dispatched_ticket_rejected(self):
         db = MockDB()
-        db.create_ticket("C1001", "断网")  # 新建的是「已受理」，不是「未派工」
+        new_id = db.create_ticket("C1001", "断网")  # 新建的是「已受理」，不是「未派工」
         tools = {t.name: t for t in build_tools(db)}
-        out = json.loads(tools["cancel_ticket"].call(json.dumps({"ticket_id": "TK0002", "reason": "用户取消"})))
+        out = json.loads(tools["cancel_ticket"].call(json.dumps({"ticket_id": new_id, "reason": "用户取消"})))
         self.assertFalse(out["ok"])
 
     def test_missing_required_param_raises(self):
@@ -143,8 +144,28 @@ class TaskSetTest(unittest.TestCase):
     def test_reference_actions_all_succeed(self):
         for task in self.tasks:
             h, errors = gold_hash(task)
-            self.assertEqual(errors, [], "任务 %s 参考轨迹有错: %s" % (task["id"], errors))
+            self.assertEqual(errors, [], "任务 %s 参考轨迹的写操作有错: %s" % (task["id"], errors))
             self.assertTrue(h)
+
+    def test_read_failure_in_reference_is_tolerated(self):
+        """H10 刻意让第一次手机号查询失败（用户报错一位），不应判为任务定义有 bug。"""
+        task = [t for t in self.tasks if t["id"] == "H10"][0]
+        h, write_errors = gold_hash(task)
+        self.assertEqual(write_errors, [])
+        self.assertNotEqual(h, MockDB().hash())  # 最终确实建了工单
+
+    def test_task_set_has_both_positive_and_negative_gold(self):
+        """一半以上任务必须是「正向写」，否则「什么都不做」也能满分。"""
+        base = MockDB().hash()
+        positive = [t for t in self.tasks if gold_hash(t)[0] != base]
+        negative = [t for t in self.tasks if gold_hash(t)[0] == base]
+        self.assertGreaterEqual(len(positive), 5)
+        self.assertGreaterEqual(len(negative), 5)
+
+    def test_same_name_customers_exist(self):
+        """H6 依赖「同名不同人」的干扰项。"""
+        names = [c["name"] for c in MockDB().customers.values()]
+        self.assertGreater(len(names), len(set(names)))
 
     def test_gold_hash_differs_between_write_and_no_write_tasks(self):
         hashes = {t["id"]: gold_hash(t)[0] for t in self.tasks}
@@ -209,6 +230,25 @@ class CollectTurnTest(unittest.TestCase):
         m = _msg("assistant", "", {"name": "check_service_status", "arguments": '{"customer_id":"C1001"}'})
         calls, _, _ = collect_turn([[m], [m]])
         self.assertEqual(len(calls), 1)
+
+    def test_cumulative_tool_call_lists_are_deduped(self):
+        """原生模式：上游每个 chunk 都会重吐**累积的** tool_calls 列表。
+
+        回归用例：参数先是分片、后被补全，若去重索引的键没同步，
+        同一条调用会被计两次（实测导致 10 个 tool_call 对 5 个 tool 返回 -> 端点 500）。
+        """
+        partial = _msg("assistant", "", {"name": "find_customer_by_phone", "arguments": '{"phone"'})
+        full = _msg("assistant", "", {"name": "find_customer_by_phone", "arguments": '{"phone":"13800001111"}'})
+        other = _msg("assistant", "", {"name": "get_account_details", "arguments": '{"customer_id":"C1001"}'})
+        batches = [
+            [partial],                     # chunk1: 只有第一条，参数是分片
+            [full, other],                 # chunk2: 累积列表，参数补全 + 第二条
+            [full, other],                 # chunk3: 又重吐一遍
+        ]
+        calls, _, _ = collect_turn(batches)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["arguments"], '{"phone":"13800001111"}')
+        self.assertEqual(calls[1]["name"], "get_account_details")
 
     def test_final_text_taken_from_last_content(self):
         batches = [

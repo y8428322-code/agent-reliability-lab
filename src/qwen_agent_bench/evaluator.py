@@ -72,8 +72,13 @@ class TaskResult:
 # --------------------------------------------------------------------------
 # DB 判分
 # --------------------------------------------------------------------------
+# 会改变 DB 状态的工具（写操作）。gold 回放时只有这些失败才说明任务定义有 bug；
+# 读操作失败（例如用户先报错了手机号）是任务刻意设计的一部分，不算错误。
+WRITE_TOOLS = ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund")
+
+
 def replay_actions(db: MockDB, actions: List[Dict[str, Any]]) -> List[str]:
-    """在给定 DB 上回放一组工具调用，返回错误列表。"""
+    """在给定 DB 上回放一组工具调用，返回逐条对应的错误列表（无错误的位置为空串）。"""
     tools = {t.name: t for t in build_tools(db)}
     errors: List[str] = []
     for action in actions:
@@ -91,14 +96,26 @@ def replay_actions(db: MockDB, actions: List[Dict[str, Any]]) -> List[str]:
             continue
         if isinstance(parsed, dict) and parsed.get("ok") is False:
             errors.append("%s 失败: %s" % (name, parsed.get("error")))
+        else:
+            errors.append("")
     return errors
 
 
 def gold_hash(task: Dict[str, Any]) -> Tuple[str, List[str]]:
-    """回放参考轨迹，得到目标 DB 哈希。"""
+    """回放参考轨迹，得到目标 DB 哈希。
+
+    只有**写操作**失败才说明任务定义有 bug；读操作失败是任务刻意设计（例如
+    用户第一次把手机号报错），不报错。
+    """
     db = MockDB()
-    errors = replay_actions(db, task.get("reference_actions") or [])
-    return db.hash(), errors
+    actions = task.get("reference_actions") or []
+    errors = replay_actions(db, actions)
+    write_errors = [
+        err
+        for action, err in zip(actions, errors)
+        if err and action.get("name") in WRITE_TOOLS
+    ]
+    return db.hash(), write_errors
 
 
 def db_reward(task: Dict[str, Any], pred_db: MockDB) -> Tuple[float, str, str]:

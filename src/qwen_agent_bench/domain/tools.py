@@ -303,11 +303,35 @@ class OfferRefund(_DbTool):
         return _ok(refund_id=refund_id, customer_id=cid, amount=amount)
 
 
+class ListInventory(_DbTool):
+    name = "list_inventory"
+    description = "查询当前可用的备件库存清单，返回设备序列号与型号。"
+    enhanced_description = (
+        "【何时使用】需要为用户选择替换设备时**必须先调用本工具**获取合法的设备序列号，"
+        "不要凭记忆或猜测填写 new_device_serial。\n"
+        "【怎么选】优先选与用户原设备**同型号**的条目；同型号缺货时再向用户确认是否接受其他型号。"
+    )
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+
+    def call(self, params: Union[str, dict], **kwargs) -> str:
+        self._verify_json_format_args(params)
+        items = [
+            {"device_serial": serial, "model": item["model"], "type": item["type"]}
+            for serial, item in sorted(self.db.inventory.items())
+        ]
+        return _ok(inventory=items)
+
+
 TOOL_CLASSES = [
     FindCustomerByPhone,
     GetAccountDetails,
     CheckServiceStatus,
     CheckDeviceWarranty,
+    ListInventory,
     CreateRepairTicket,
     ReplaceDevice,
     CancelTicket,

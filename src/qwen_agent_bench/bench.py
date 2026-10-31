@@ -10,17 +10,24 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from qwen_agent_demo.config import load_app_config
-from qwen_agent_demo.model_factory import MissingApiKeyError, build_llm
+# 必须在 import qwen_agent 之前设置：上游 `qwen_agent/settings.py` 在**导入时**读取该变量，
+# 用它限制一次 agent 运行内的 LLM 调用次数（默认 20）。
+# 实测：模型在原生 function calling 下遇到工具报错会「扫射式」重试
+# （单轮 87 次工具调用），不设上限会烧掉大量 token 且不产生正确结果。
+os.environ.setdefault("QWEN_AGENT_MAX_LLM_CALL_PER_RUN", "12")
 
-from .domain.loader import load_tasks
-from .evaluator import TaskResult
-from .runner import run_task
-from .variants import VARIANTS
+from qwen_agent_demo.config import load_app_config  # noqa: E402
+from qwen_agent_demo.model_factory import MissingApiKeyError, build_llm  # noqa: E402
+
+from .domain.loader import load_tasks  # noqa: E402
+from .evaluator import TaskResult  # noqa: E402
+from .runner import run_task  # noqa: E402
+from .variants import VARIANTS, variant_uses_native  # noqa: E402
 
 OUT_DIR = Path(__file__).resolve().parents[2] / "results"
 
@@ -127,15 +134,19 @@ def main() -> None:
 
     app_cfg = load_app_config()
     try:
-        llm = build_llm(app_cfg.model)
+        llm_textual = build_llm(app_cfg.model, use_raw_api=False)
+        llm_native = build_llm(app_cfg.model, use_raw_api=True)
     except MissingApiKeyError as exc:
         raise SystemExit(str(exc))
+
+    llm_by_mode = {"native": llm_native, "textual": llm_textual}
 
     print("模型: %s   端点: %s" % (app_cfg.model.model, app_cfg.model.base_url))
     print("变体: %s   任务数: %d   重复: %d   NL 判定: %s" % (variants, len(tasks), args.trials, not args.no_nl))
 
     results: List[TaskResult] = []
     for variant in variants:
+        llm = llm_by_mode["native" if variant_uses_native(variant) else "textual"]
         for task in tasks:
             for trial in range(1, args.trials + 1):
                 res = run_task(

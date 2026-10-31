@@ -55,7 +55,11 @@ def collect_turn(batches: List[List[Any]]) -> Tuple[List[Dict[str, str]], List[T
                     if prev["name"] != name:
                         continue
                     if len(args) > len(prev["arguments"]) and args.startswith(prev["arguments"]):
+                        # 参数被补全 -> 去重索引的键也要同步，否则后续同一条消息
+                        # 会因为「旧键已失效」被当成新调用重复计入
+                        call_index.pop((prev["name"], prev["arguments"]), None)
                         prev["arguments"] = args
+                        call_index[(name, args)] = back
                         merged = True
                     break
                 if merged:

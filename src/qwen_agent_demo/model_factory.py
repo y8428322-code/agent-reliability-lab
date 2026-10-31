@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from qwen_agent.llm import get_chat_model
 from qwen_agent.llm.base import BaseChatModel
+from qwen_agent.llm.oai import TextChatAtOAI
 
 from .config import ModelConfig
 
@@ -14,8 +15,38 @@ class MissingApiKeyError(RuntimeError):
     """未找到可用的 API 密钥。"""
 
 
-def build_llm(cfg: ModelConfig) -> BaseChatModel:
+class CompatOAI(TextChatAtOAI):
+    """修一个上游与严格 OpenAI 兼容服务的协议不兼容点。
+
+    上游 `BaseChatModel._conv_qwen_agent_messages_to_oai` 把工具结果消息转换成
+    `{'role': 'tool', 'id': <function_id>}`，但 OpenAI 规范里工具消息关联
+    tool_call 用的是 **`tool_call_id`** 字段。
+
+    MiniMax 的 `/v1/chat/completions` 会严格校验：只给 `id` 时直接返回
+    `400 invalid params, tool result's tool id() not found (2013)`；
+    补上 `tool_call_id` 后即通过（两个字段都给也可以）。
+
+    这个错误只在**原生 function calling**（`use_raw_api`）下暴露——文本式
+    function calling 会把工具结果渲染成正文，不会产生 role=tool 消息。
+
+    不改上游源码，只在本封装层覆写转换结果。
+    """
+
+    def convert_messages_to_dicts(self, messages: List[Any]) -> List[Dict[str, Any]]:
+        converted = super().convert_messages_to_dicts(messages)
+        for msg in converted:
+            if msg.get("role") == "tool" and not msg.get("tool_call_id") and msg.get("id"):
+                msg["tool_call_id"] = msg["id"]
+        return converted
+
+
+def build_llm(cfg: ModelConfig, use_raw_api: bool = False) -> BaseChatModel:
     """按配置构造 LLM 实例。
+
+    Args:
+        use_raw_api: 走上游的原生 function calling（`raw_chat` -> 直接传 tools 参数），
+            而不是默认的 Nous **文本式** function calling（模型须自己吐 <tool_call> JSON）。
+            对非 Qwen 的 OpenAI 兼容模型，原生模式通常更稳。
 
     Raises:
         MissingApiKeyError: 环境变量中找不到任何可用密钥。
@@ -25,7 +56,13 @@ def build_llm(cfg: ModelConfig) -> BaseChatModel:
             "未找到 API 密钥。请设置环境变量 %s（参见 .env.example）；"
             "或设置回退变量 %s。" % (cfg.api_key_env, cfg.fallback_env)
         )
-    return get_chat_model(cfg.to_chat_cfg())
+    chat_cfg = cfg.to_chat_cfg()
+    if use_raw_api:
+        chat_cfg.setdefault("generate_cfg", {})
+        chat_cfg["generate_cfg"]["use_raw_api"] = True
+    if cfg.model_type == "oai":
+        return CompatOAI(chat_cfg)
+    return get_chat_model(chat_cfg)
 
 
 def check_endpoint(cfg: ModelConfig, timeout: Optional[int] = None) -> str:
