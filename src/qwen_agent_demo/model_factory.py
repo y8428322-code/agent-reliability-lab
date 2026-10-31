@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from qwen_agent.llm import get_chat_model
 from qwen_agent.llm.base import BaseChatModel
@@ -74,3 +74,51 @@ def check_endpoint(cfg: ModelConfig, timeout: Optional[int] = None) -> str:
             "端点未返回 tool_calls，工具调用不可用。响应: %s" % json.dumps(choice, ensure_ascii=False)[:300]
         )
     return tool_calls[0]["function"]["name"]
+
+
+def chat(
+    cfg: ModelConfig,
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.0,
+    max_tokens: int = 1024,
+    timeout: Optional[int] = None,
+    retries: int = 3,
+) -> str:
+    """纯文本对话（不传 tools），用于评判器 / 反思等旁路调用。
+
+    带重试：批量跑评测时连续请求容易触发端点限流/超时，
+    判定失败必须与「断言不成立」区分开，否则会把基础设施抖动误判成模型能力问题。
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    payload: Dict[str, Any] = {
+        "model": cfg.model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        cfg.base_url.rstrip("/") + "/chat/completions",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer %s" % cfg.resolve_api_key(),
+        },
+        method="POST",
+    )
+    limit = timeout or cfg.generate_cfg.get("timeout", 120)
+    last_error: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=limit) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return (body["choices"][0]["message"].get("content") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+    raise RuntimeError("模型调用失败(重试 %d 次): %s" % (retries, last_error))

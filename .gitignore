@@ -24,3 +24,6 @@ workspace/
 
 # 密钥
 .env
+
+# 评测结果产物
+results/

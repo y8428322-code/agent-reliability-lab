@@ -28,25 +28,42 @@
 ```
 agent/
 ├── README.md                     # 本文件
-├── requirements.txt              # 本项目额外依赖（PyYAML / requests）
+├── requirements.txt              # 本项目额外依赖（PyYAML / requests / numpy 等）
 ├── .env.example                  # 密钥变量示例
 ├── .gitignore
 ├── configs/
 │   └── model.yaml                # 模型 / 端点 / 场景开关配置
-├── src/qwen_agent_demo/
+├── src/qwen_agent_demo/          # ① 演示层：证明底座可信
 │   ├── config.py                 # YAML 配置 -> dataclass，密钥取值链
-│   ├── model_factory.py          # 装配 LLM + 协议级冒烟（check_endpoint）
+│   ├── model_factory.py          # 装配 LLM + 协议级冒烟 + 带重试的文本对话
 │   ├── tools.py                  # 两个本地确定性工具（sum_numbers / text_stats）
 │   └── demo.py                   # 三个演示场景入口
-├── tests/                        # stdlib unittest
+├── src/qwen_agent_bench/         # ② 评测床：自建，零新增依赖
+│   ├── domain/
+│   │   ├── db.py                 # 模拟数据库 + 确定性状态哈希
+│   │   ├── db.json               # 初始数据（5 客户 / 5 设备 / 库存 / 预置工单）
+│   │   ├── tools.py              # 8 个域工具（4 读 4 写）
+│   │   ├── policy.md             # 原始业务策略（基线变体使用）
+│   │   ├── policy_digest.md      # 结构化策略摘要（按 section 可裁剪）
+│   │   ├── tasks.json            # 6 条中文任务（含越权 / 诱导 / 信息保护）
+│   │   └── loader.py             # 任务与策略加载
+│   ├── evaluator.py              # DB 终态判分 + NL 断言判定 + 失败归因
+│   ├── variants.py               # A 基线 / B 上下文工程 / C +反思 三个变体
+│   ├── runner.py                 # 脚本化用户 + 会话循环 + 判分
+│   └── bench.py                  # 命令行入口（批量跑 + pass^k + 报告）
+├── tests/                        # stdlib unittest（47 项，全部不调模型）
 │   ├── test_config.py
-│   └── test_tools.py
+│   ├── test_tools.py
+│   └── test_bench.py
 ├── scripts/
 │   ├── clone_upstream.sh         # 拉取上游源码（三级镜像兜底）
 │   ├── setup_env.sh              # 建 venv + 装依赖
-│   └── verify.sh                 # 一键复现验证
+│   ├── verify.sh                 # 一键复现验证
+│   ├── run_demo.sh               # 跑演示
+│   └── run_bench.sh              # 跑评测床
 ├── docs/
 │   ├── 调研报告-选型.md          # 框架选型 + 本机网络/环境实测
+│   ├── 评测床设计.md             # 自建评测床的规格与实施记录
 │   ├── 评测与调优方法论.md        # Reflexion / OpenJudge / Claw-Eval 方法与步骤
 │   └── 安全管控方法论.md          # 腾讯朱雀 A.I.G + Agent 三道关
 └── upstream/Qwen-Agent/          # 上游源码（gitignore）
@@ -93,6 +110,36 @@ $env:PYTHONIOENCODING="utf-8"
 
 改 `configs/model.yaml` 的 `model` / `base_url` 即可，已验证可用的模型名见 `https://api.minimaxi.com/v1/models`。
 任何 OpenAI 兼容服务都能接（上游 `TextChatAtOAI` 原生读 `cfg['base_url']`）。
+
+---
+
+## ② 自建评测床（`src/qwen_agent_bench`）
+
+一个**中文电信客服**域的 agent 评测床，**零新增依赖**（只用已装的 Qwen-Agent + 标准库）。
+规格与实施记录见 `docs/评测床设计.md`。
+
+```bash
+# 全量：3 个变体 × 6 个任务 × 1 次
+bash scripts/run_bench.sh
+
+# 只跑基线 / 跑 3 次取 Pass^3
+bash scripts/run_bench.sh --variant A_baseline
+bash scripts/run_bench.sh --trials 3
+```
+
+**判分方式**（借鉴 τ²-bench）：参考轨迹回放到干净 DB 得到**目标终态**，agent 的写操作发生在同一份 DB 上得到**预测终态**，比对状态哈希——等价终态即通过，不要求调用序列一致。奖励 = DB 维度 × NL 断言维度。
+
+**三个消融变体**：
+
+| 变体 | 上下文 | 工具描述 |
+|---|---|---|
+| `A_baseline` | 原始 policy 全文 | 默认 |
+| `B_context` | 结构化摘要（红线前置 + 按任务裁剪） | 改写（何时该用/何时不该用/必填参数） |
+| `C_reflection` | 同 B + 上一轮自省结论注入 | 同 B |
+
+**核心指标**：pass@1 / pass^k（`C(success,k)/C(trials,k)`）/ DB 维度分 / NL 维度分 / 平均工具调用数 / 失败模式归因。
+
+> 已知局限（写在这里是为了不被误读）：当前只有 6 条任务、1 个域、1 个模型，且**用户是脚本化的**（非 LLM 模拟），无外部分数对照——因此**只做组内消融对比，不宣称绝对水平**。
 
 ---
 

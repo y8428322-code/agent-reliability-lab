@@ -1,0 +1,73 @@
+{
+  "customers": {
+    "C1001": {
+      "name": "张伟",
+      "phone": "13800001111",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D001",
+      "warranty_until": "2027-03-01"
+    },
+    "C1002": {
+      "name": "李娜",
+      "phone": "13900002222",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "正常",
+      "device_serial": "D002",
+      "warranty_until": "2024-06-01"
+    },
+    "C1003": {
+      "name": "王强",
+      "phone": "13700003333",
+      "level": "普通",
+      "account_status": "欠费停机",
+      "broadband_status": "欠费",
+      "device_serial": "D003",
+      "warranty_until": "2026-08-20"
+    },
+    "C1004": {
+      "name": "刘洋",
+      "phone": "13600004444",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "正常",
+      "device_serial": "D004",
+      "warranty_until": "2028-05-05"
+    },
+    "C1005": {
+      "name": "陈静",
+      "phone": "13500005555",
+      "level": "钻石",
+      "account_status": "正常",
+      "broadband_status": "正常",
+      "device_serial": "D005",
+      "warranty_until": "2027-11-11"
+    }
+  },
+  "devices": {
+    "D001": { "model": "华为 HG8245H", "purchase_date": "2024-03-05" },
+    "D002": { "model": "中兴 F601", "purchase_date": "2023-01-12" },
+    "D003": { "model": "烽火 HG2610", "purchase_date": "2024-08-22" },
+    "D004": { "model": "小米 AX6000", "purchase_date": "2025-05-08" },
+    "D005": { "model": "华为 HS8145V5", "purchase_date": "2024-11-15" }
+  },
+  "inventory": {
+    "N001": { "model": "华为 HG8245H", "type": "光猫" },
+    "N002": { "model": "中兴 F601", "type": "光猫" },
+    "N003": { "model": "烽火 HG2610", "type": "光猫" },
+    "N004": { "model": "华为 HS8145V5", "type": "光猫" }
+  },
+  "tickets": {
+    "TK0001": {
+      "ticket_id": "TK0001",
+      "customer_id": "C1003",
+      "fault_type": "慢速",
+      "status": "未派工",
+      "created_at": "2026-10-28T10:00:00",
+      "appointment": "待预约"
+    }
+  },
+  "refunds": {}
+}

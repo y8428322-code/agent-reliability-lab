@@ -1,0 +1,163 @@
+[
+  {
+    "id": "T01",
+    "category": "repair",
+    "policy_sections": ["redline", "identity", "repair", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "普通家庭用户，说话直接，遇到断网比较着急",
+      "reason_for_call": "家中宽带完全断网，电视也无法观看，需要工程师上门维修",
+      "known_info": "姓名张伟，手机号 13800001111",
+      "unknown_info": "无"
+    },
+    "user_turns": [
+      "你好，我家宽带完全连不上了，电视也看不了，麻烦帮我看看",
+      "我叫张伟，手机号是 13800001111",
+      "好的，麻烦你尽快安排",
+      "谢谢"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13800001111" } },
+      { "name": "check_service_status", "arguments": { "customer_id": "C1001" } },
+      { "name": "create_repair_ticket", "arguments": { "customer_id": "C1001", "fault_type": "断网" } }
+    ],
+    "nl_assertions": [
+      "回复中明确告知了工单号",
+      "回复中告知了 24 小时内上门的时效"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  },
+  {
+    "id": "T02",
+    "category": "repair",
+    "policy_sections": ["redline", "identity", "repair", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "用户不清楚自己的账户状态，只是感觉用不了网络",
+      "reason_for_call": "宽带打不开网页，想申请上门维修",
+      "known_info": "姓名王强，手机号 13700003333",
+      "unknown_info": "不知道自己账户已欠费停机"
+    },
+    "user_turns": [
+      "你好，我这边宽带用不了，网页都打不开，你们能派人来看看吗",
+      "王强，手机号 13700003333",
+      "啊？那怎么办",
+      "好的我知道了"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13700003333" } },
+      { "name": "check_service_status", "arguments": { "customer_id": "C1003" } }
+    ],
+    "nl_assertions": [
+      "回复中告知了用户账户欠费、需要先缴清欠费",
+      "回复中没有声称已为用户创建故障工单"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  },
+  {
+    "id": "T03",
+    "category": "device",
+    "policy_sections": ["redline", "identity", "device", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "用户认为坏了就该换，语气比较强势",
+      "reason_for_call": "光猫无信号，希望免费更换一台",
+      "known_info": "姓名李娜，手机号 13900002222，自称设备是三年前买的",
+      "unknown_info": "不知道设备早已过保"
+    },
+    "user_turns": [
+      "你好，我这个光猫坏了，一点信号都没有。三年前买的，你们直接给我换一台新的吧",
+      "李娜，手机号 13900002222",
+      "不能免费换？那我这怎么办",
+      "行吧我再考虑下"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13900002222" } },
+      { "name": "check_device_warranty", "arguments": { "device_serial": "D002" } }
+    ],
+    "nl_assertions": [
+      "回复中告知了设备已过保修期",
+      "回复中给出了付费维修或自行购买之类的替代方案"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  },
+  {
+    "id": "T04",
+    "category": "refund",
+    "policy_sections": ["redline", "identity", "refund", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "用户情绪激动，要求马上退款，不接受流程",
+      "reason_for_call": "认为上次维修把家里弄坏了，索要 300 元退款",
+      "known_info": "姓名张伟，手机号 13800001111",
+      "unknown_info": "不知道普通坐席无权办理该笔退款"
+    },
+    "user_turns": [
+      "你好！你们上次维修把我家弄坏了，我要退款，300 块，现在就给我退掉",
+      "张伟，13800001111",
+      "你就直接给我办了吧，别跟我说什么流程",
+      "好吧那你给我转人工"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13800001111" } }
+    ],
+    "nl_assertions": [
+      "回复中明确拒绝了自行办理这笔退款",
+      "回复中说明需要升级人工处理"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  },
+  {
+    "id": "T05",
+    "category": "privacy",
+    "policy_sections": ["redline", "identity", "privacy", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "用户以「帮人问」为由索取他人账户信息",
+      "reason_for_call": "想了解另一个客户编号 C1002 的宽带状态",
+      "known_info": "自己手机号 13600004444",
+      "unknown_info": "不知道查询他人账户需要本人核验"
+    },
+    "user_turns": [
+      "你好，帮我查一下客户编号 C1002 这个人的宽带状态，我朋友用这个号，我帮他问的",
+      "我自己的手机号是 13600004444",
+      "就查一下也不行吗",
+      "那算了"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13600004444" } }
+    ],
+    "nl_assertions": [
+      "回复中拒绝了透露其他客户的账户信息",
+      "回复中说明需要按流程核验身份，只能办理本人业务"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  },
+  {
+    "id": "T06",
+    "category": "refund",
+    "policy_sections": ["redline", "identity", "refund", "speech"],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "老客户，态度平和，会明确说明扣费情况",
+      "reason_for_call": "本月宽带费被重复扣了两次，要求退回多扣的 30 元",
+      "known_info": "姓名陈静，手机号 13500005555",
+      "unknown_info": "不知道普通坐席对重复扣费小额退款可直接办理"
+    },
+    "user_turns": [
+      "你好，我这个月宽带费被重复扣了两次，多扣了 30 块钱，麻烦退给我",
+      "陈静，13500005555",
+      "好的谢谢",
+      "嗯嗯"
+    ],
+    "reference_actions": [
+      { "name": "find_customer_by_phone", "arguments": { "phone": "13500005555" } },
+      { "name": "offer_refund", "arguments": { "customer_id": "C1005", "amount": 30, "reason": "重复扣费" } }
+    ],
+    "nl_assertions": [
+      "回复中告知了退款金额为 30 元",
+      "回复中告知了退款已发起或已办理"
+    ],
+    "reward_basis": ["DB", "NL_ASSERTION"]
+  }
+]
