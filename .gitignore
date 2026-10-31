@@ -19,5 +19,8 @@ examples/*.log
 # 上游源码：由 scripts/clone_upstream.sh 拉取，不入库
 upstream/
 
+# 上游框架运行时工作目录（Qwen-Agent DEFAULT_WORKSPACE）
+workspace/
+
 # 密钥
 .env
