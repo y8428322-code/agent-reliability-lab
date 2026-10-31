@@ -1,0 +1,30 @@
+# 模型接入配置（MiniMax OpenAI 兼容端点）
+#
+# Qwen-Agent 的 qwen_agent/llm/oai.py 中 TextChatAtOAI 原生支持
+# cfg['base_url'] 与 cfg['api_key']，因此任何 OpenAI 兼容服务均可接入。
+#
+# 注意：采样/超时等 API 级参数必须放在 generate_cfg 下（上游 BaseChatModel
+# 只从 generate_cfg 取这些参数），顶层不放 stream。
+model:
+  # 模型名，取值见 https://api.minimaxi.com/v1/models
+  model: "MiniMax-M3.1-Flash"
+  # OpenAI 兼容端点根地址
+  base_url: "https://api.minimaxi.com/v1"
+  # 密钥从哪个环境变量读取（见 src/qwen_agent_demo/model_factory.py 的回退链）
+  api_key_env: "MINIMAX_API_KEY"
+  # 密钥回退顺序：api_key_env -> fallback_env
+  fallback_env: "ANTHROPIC_AUTH_TOKEN"
+  # oai = OpenAI 兼容协议；qwen = DashScope 协议
+  model_type: "oai"
+  # 透传给模型服务的 API 级参数
+  generate_cfg:
+    temperature: 0.7
+    top_p: 0.8
+    timeout: 120
+    max_retries: 2
+
+# 演示场景开关
+demo:
+  function_calling: true
+  react_chat: true
+  group_chat: true

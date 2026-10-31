@@ -1,0 +1,17 @@
+# 本项目自身的额外依赖。
+# 上游框架 Qwen-Agent 由 scripts/setup_env.sh 从 upstream/Qwen-Agent 源码 editable 安装，
+# 其 setup.py 的 install_requires 已覆盖 dashscope / openai / pydantic / json5 / tiktoken / pillow 等。
+#
+# 下面这批是上游 setup.py **漏声明**、但在模块级 import、不装就会 import 失败的依赖：
+#   numpy       -> qwen_agent/utils/utils.py
+#   soundfile   -> qwen_agent/utils/utils.py
+#   ipykernel   -> qwen_agent/tools/code_interpreter.py
+#   regex       -> qwen_agent/tools/python_executor.py
+#   tqdm        -> qwen_agent/tools/python_executor.py
+PyYAML>=6.0
+requests>=2.31
+numpy>=1.24
+soundfile>=0.12
+ipykernel>=6.29
+regex>=2024.0
+tqdm>=4.66
