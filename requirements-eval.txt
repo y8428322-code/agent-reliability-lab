@@ -1,9 +1,0 @@
-# 评测底座（τ²-bench）阶段的额外依赖。
-#
-# 与 requirements.txt 分开：前者是 agent 工程本身，后者是评测/调优阶段的工具链，
-# 避免把评测专用依赖混进 agent 运行时。
-#
-# litellm：τ²-bench 用它做模型抽象（--agent-llm / --user-llm），支持任意 OpenAI 兼容端点，
-# 我们用它把 agent 与用户模拟器都指向本机的 MiniMax 端点。
-litellm>=1.60
-openai>=1.50
