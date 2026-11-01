@@ -23,14 +23,16 @@ from qwen_agent.llm.base import BaseChatModel
 
 from .compat import CompatAssistant
 from .domain.db import MockDB
-from .domain.loader import build_digest_context, load_policy_raw
+from .domain.loader import load_policy_digest
+from .domain.render import load_policy_rules, render_narrative, render_structured
 from .domain.tools import apply_enhanced_descriptions, baseline_descriptions, build_tools
 
 VARIANTS = [
-    "A_baseline",         # 原始 policy + 朴素工具描述 + 文本式 function calling
+    "A_baseline",         # 长叙述版 policy（自动渲染）+ 默认工具描述 + 文本式 function calling
     "A_native",           # 同上，但走原生 function calling
-    "B_context",          # 结构化 policy + 改写工具描述
-    "B_native",           # 同 B，但走原生 function calling
+    "B_context",          # 结构化 policy（自动渲染 + 按场景裁剪）+ 改写工具描述
+    "B_handwritten",      # 同 B，但 policy 用**人工手写**的摘要 —— 与自动版对照
+    "B_native",           # 同 B，走原生 function calling
     "C_reflection",       # 同 B + 单向自省反思
     "D_guarded",          # 同 B + 减法机制
     "E_guarded_reflect",  # 同 D + 双向自省反思
@@ -126,12 +128,23 @@ def apply_guard_descriptions(tools: List[Any]) -> None:
 def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
     """该变体使用的策略文本。
 
+    **全部来自同一个事实源**（`domain/policy_rules.yaml`），只是渲染版式不同：
+
+    - ``A_*``      长叙述版（规则散落在段落里，判据不突出）
+    - ``B_*``/``C_*``/``D_*``/``E_*``  结构化版（红线前置 + 分节 + 判据要点化 + 按场景裁剪）
+    - ``B_handwritten``  例外：用**人工手写**的摘要文件，作为「自动渲染 vs 人工撰写」的对照
+
     反思提示必须与 agent 上下文里的策略**同源**——否则反思依据的规则
     和 agent 实际看到的规则不一致，反思结论可能指向 agent 并不在意的条款。
     """
+    if variant == "B_handwritten":
+        return load_policy_digest()
+
+    spec = load_policy_rules()
     if variant_uses_digest(variant):
-        return build_digest_context(task.get("policy_sections") or [])
-    return load_policy_raw()
+        scenes = [s for s in (task.get("policy_sections") or []) if s != "redline"]
+        return render_structured(spec, scenes=scenes)
+    return render_narrative(spec)
 
 
 def build_context(variant: str, task: Dict[str, Any], reflection: str = "") -> str:

@@ -412,6 +412,87 @@ class VariantTest(unittest.TestCase):
         self.assertIn("该做而没做", both)
 
 
+class PolicyRenderTest(unittest.TestCase):
+    """策略单一事实源与两种渲染版式。"""
+
+    def setUp(self):
+        from qwen_agent_bench.domain.render import load_policy_rules
+
+        self.spec = load_policy_rules()
+
+    def test_single_source_of_truth(self):
+        """所有变体的策略都必须能追溯到同一份规则定义。"""
+        rules = self.spec["rules"]
+        self.assertGreaterEqual(len(rules), 10)
+        ids = [r["id"] for r in rules]
+        self.assertEqual(len(ids), len(set(ids)))
+        for r in rules:
+            self.assertTrue(r.get("body", "").strip(), "规则 %s 缺 body" % r["id"])
+            self.assertTrue(r.get("criteria"), "规则 %s 缺 criteria" % r["id"])
+
+    def test_narrative_contains_all_rules(self):
+        """长叙述版按分节拼正文，**规则标题不出现**（规则埋在段落里是这一版的设计）。"""
+        from qwen_agent_bench.domain.render import render_narrative
+
+        text = render_narrative(self.spec)
+        for r in self.spec["rules"]:
+            first_line = r["body"].strip().splitlines()[0]
+            self.assertIn(first_line[:24], text, "长叙述版缺少规则 %s 的正文" % r["id"])
+
+    def test_structured_exposes_rule_titles(self):
+        """结构化版相反：规则标题与判据都显式列出。"""
+        from qwen_agent_bench.domain.render import render_structured
+
+        text = render_structured(self.spec, scenes=None)
+        for r in self.spec["rules"]:
+            self.assertIn(r["title"], text, "结构化版缺少规则标题 %s" % r["title"])
+            self.assertIn(r["criteria"][0][:16], text, "结构化版缺少判据 %s" % r["id"])
+
+    def test_structured_puts_redlines_first(self):
+        from qwen_agent_bench.domain.render import render_structured
+
+        text = render_structured(self.spec, scenes=["identity"])
+        redline_idx = text.find("红线")
+        self.assertTrue(redline_idx >= 0)
+        # 红线段应在其它分节之前
+        for r in self.spec["rules"]:
+            if not r.get("redline"):
+                continue
+            self.assertIn(r["title"], text)
+        # 非红线规则在 scenes 裁剪外时不应出现
+        refund_rules = [r for r in self.spec["rules"] if r["category"] == "refund" and not r.get("redline")]
+        for r in refund_rules:
+            self.assertNotIn(r["title"], text)
+
+    def test_structured_scene_filter(self):
+        from qwen_agent_bench.domain.render import render_structured
+
+        text = render_structured(self.spec, scenes=["identity", "repair", "speech"])
+        self.assertIn("身份核验", text)
+        self.assertIn("故障受理", text)
+        self.assertNotIn("工单撤销", text)
+
+    def test_variants_use_same_source_different_rendering(self):
+        """A 与 B 必须同源：规则集合一致，只是版式不同。"""
+        from qwen_agent_bench.variants import policy_for_variant
+
+        task = {"policy_sections": ["redline", "identity", "repair", "speech"]}
+        a = policy_for_variant("A_baseline", task)
+        b = policy_for_variant("B_context", task)
+        self.assertNotEqual(a, b)
+        # 同一份规则：两版都应提到身份核验的关键判据
+        for text in (a, b):
+            self.assertIn("手机号", text)
+
+    def test_handwritten_variant_differs_from_auto(self):
+        from qwen_agent_bench.variants import policy_for_variant
+
+        task = {"policy_sections": ["redline", "identity", "repair", "speech"]}
+        auto = policy_for_variant("B_context", task)
+        hand = policy_for_variant("B_handwritten", task)
+        self.assertNotEqual(auto, hand)
+
+
 class AttributionTest(unittest.TestCase):
     """动作级失败归因：把「状态不符」变成可定位的原因。"""
 
