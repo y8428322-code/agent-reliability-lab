@@ -98,8 +98,8 @@ def main() -> None:
     print("工具调用与报错（**中位数为主**：均值会被失控运行拉偏）")
     print("-" * 110)
     print(
-        "%-20s %-12s %-12s %-12s %-14s %s"
-        % ("变体", "中位工具调用", "平均工具调用", "P90", "失控运行数", "有工具报错运行数")
+        "%-20s %-12s %-12s %-12s %-14s %-16s %s"
+        % ("变体", "中位工具调用", "平均工具调用", "P90", "失控运行数", "格式错误运行数", "有工具报错运行数")
     )
     for v in variants:
         items = by_variant[v]
@@ -107,18 +107,34 @@ def main() -> None:
         med = tc[len(tc) // 2]
         p90 = tc[int(len(tc) * 0.9)]
         runaway = sum(1 for r in items if r.get("runaway"))
+        fmt = sum(1 for r in items if r.get("format_error"))
         print(
-            "%-20s %-12.0f %-12.2f %-12.0f %-14s %d/%d"
+            "%-20s %-12.0f %-12.2f %-12.0f %-14s %-16s %d/%d"
             % (
                 v,
                 med,
                 sum(tc) / len(tc),
                 p90,
                 "%d/%d" % (runaway, len(items)),
+                "%d/%d" % (fmt, len(items)),
                 sum(1 for r in items if r.get("tool_errors")),
                 len(items),
             )
         )
+
+    # 任务区分度：**不同变体在该任务上结果不同**的任务占比
+    discriminating = []
+    for t in tasks:
+        rates = []
+        for v in variants:
+            items = [r for r in by_variant[v] if r["task_id"] == t]
+            if items:
+                rates.append(round(sum(1 for r in items if r["success"]) / len(items), 3))
+        if len(set(rates)) > 1:
+            discriminating.append(t)
+    print()
+    print("任务区分度：%d/%d 个任务能区分变体（各变体在该任务上的通过率不全相同）" % (len(discriminating), len(tasks)))
+    print("  -> %s" % (", ".join(discriminating) or "无"))
 
 
 if __name__ == "__main__":

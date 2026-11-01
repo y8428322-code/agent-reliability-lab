@@ -9,7 +9,14 @@ from qwen_agent_demo.model_factory import chat, normalize_args as _normalize_arg
 
 from .domain.db import MockDB
 from .domain.loader import load_policy_raw
-from .evaluator import TaskResult, TurnRecord, attribute_failure, db_reward, judge_all
+from .evaluator import (
+    TaskResult,
+    TurnRecord,
+    attribute_failure,
+    db_reward,
+    judge_all,
+    unexecuted_broken_calls_for_turn,
+)
 from .variants import (
     build_agent,
     build_context,
@@ -200,6 +207,16 @@ def run_task(
         for call in calls:
             record.tool_calls.append((call["name"], call["arguments"]))
             result.n_tool_calls += 1
+
+        # 工具调用格式错误：模型写了 <tool_call> 但格式坏了（未闭合/含零宽字符），
+        # 上游解析失败 -> 工具没执行，残缺文本被原样吐给用户。
+        # 这是**独立于成败的质量指标**（上游缺陷），失败时它就是失败原因。
+        broken = unexecuted_broken_calls_for_turn(record)
+        if broken:
+            result.format_error = True
+            for name in broken:
+                if name not in result.broken_calls:
+                    result.broken_calls.append(name)
         for name, content in results:
             record.tool_results.append((name, content))
             try:

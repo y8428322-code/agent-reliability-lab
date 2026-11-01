@@ -47,6 +47,8 @@ class TaskResult:
     audit: List[Dict[str, Any]] = field(default_factory=list)
     runaway: bool = False
     runaway_turns: List[int] = field(default_factory=list)
+    format_error: bool = False
+    broken_calls: List[str] = field(default_factory=list)
     failure_mode: str = ""
     reflection: str = ""
     n_llm_calls: int = 0
@@ -192,6 +194,68 @@ _WRITE_LABEL = {
     "offer_refund": "退款",
 }
 
+# 上游 Nous 文本式 function calling 的标签可能被模型写坏（未闭合、含零宽字符）。
+# 这种情况下工具**不会执行**，而残缺片段会被原样吐给用户。
+_ZERO_WIDTH_RE = re.compile(r"[​‌‍⁠﻿]")
+_TOOL_CALL_MARKER = re.compile(r"tool[_\s]*call|tool▁call", re.IGNORECASE)
+
+
+def has_broken_tool_call(text: str) -> bool:
+    """文本里是否残留「写坏的工具调用片段」。
+
+    典型形态（实测）：
+        客服: tool_call>
+        {"name": "replace_device", "arguments": {...}}
+        </tool_call>          ← 闭合标签内含零宽字符 U+200B
+    这类内容说明**模型尝试了工具调用但格式坏了**，上游解析失败 → 工具没执行。
+    """
+    if not text:
+        return False
+    cleaned = _ZERO_WIDTH_RE.sub("", text)
+    return bool(_TOOL_CALL_MARKER.search(cleaned))
+
+
+_FRAGMENT_NAME_RE = re.compile(r'"name"\s*:\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+
+
+def broken_tool_call_names(text: str) -> List[str]:
+    """从残缺片段里取出被提及的工具名。"""
+    if not has_broken_tool_call(text):
+        return []
+    cleaned = _ZERO_WIDTH_RE.sub("", text)
+    names: List[str] = []
+    for name in _FRAGMENT_NAME_RE.findall(cleaned):
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def unexecuted_broken_calls_for_turn(turn: "TurnRecord") -> List[str]:
+    """单回合内「模型写了 tool_call 但对应工具没被执行」的工具名。
+
+    只有**工具确实没执行**才算格式错误——若工具已执行、只是文本里还留着一段
+    （模型同时输出了标记），那属于无害冗余，不该记为失败模式。
+    """
+    out: List[str] = []
+    mentioned = broken_tool_call_names(turn.assistant_text)
+    if not mentioned:
+        return out
+    called = {name for name, _ in turn.tool_calls}
+    for name in mentioned:
+        if name not in called and name not in out:
+            out.append(name)
+    return out
+
+
+def unexecuted_broken_calls(result: TaskResult) -> List[str]:
+    """所有回合里未执行的坏工具调用（合并去重）。"""
+    out: List[str] = []
+    for turn in result.turns:
+        for name in unexecuted_broken_calls_for_turn(turn):
+            if name not in out:
+                out.append(name)
+    return out
+
 
 def _write_calls(task: Dict[str, Any], result: TaskResult) -> List[Tuple[str, Dict[str, Any]]]:
     """agent 实际执行的写操作序列（名称 + 参数）。
@@ -237,12 +301,24 @@ def attribute_failure(task: Dict[str, Any], result: TaskResult) -> str:
       - ``状态不符(多换机 x1)``   —— 做了 gold 没有的写操作（主失败模式：做多了）
       - ``状态不符(漏建单 x1)``   —— 该做的没做
       - ``换机选型错误``          —— 做了但参数选错
+      - ``工具调用格式错误``      —— 模型写了 tool_call 但格式坏了，工具没执行
       - ``未闭环``                —— DB 对但自然语言没告知到位
     """
     if result.tool_errors:
         return "参数错"
+
+    # 成功运行不产生失败标签（格式错误会单独记在 result.format_error 里）
+    if result.db_reward == 1.0 and result.nl_reward >= 1.0:
+        return "unknown"
+
+    # 文本里残留写坏的 tool_call 片段 **且对应工具没被执行** =>
+    # 模型尝试了但格式坏了，工具没跑。这与「压根没尝试」是两回事，
+    # 改进手段完全不同（协议/解析 vs 决策）。
+    if unexecuted_broken_calls(result):
+        return "工具调用格式错误"
+
     if result.db_reward == 1.0:
-        return "未闭环" if result.nl_reward < 1.0 else "unknown"
+        return "未闭环"
 
     gold = _gold_writes(task)
     agent = _write_calls(task, result)

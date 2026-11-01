@@ -469,6 +469,48 @@ class AttributionTest(unittest.TestCase):
         res = self._result([], tool_errors=["x: y"])
         self.assertEqual(attribute_failure(task, res), "参数错")
 
+    def test_broken_tool_call_is_its_own_failure_mode(self):
+        """模型写了 tool_call 但格式坏了（未闭合/含零宽字符）→ 工具没执行。
+
+        这与「压根没尝试」是两回事，改进手段完全不同（协议/解析 vs 决策），
+        必须能单独归因。
+        """
+        from qwen_agent_bench.evaluator import TurnRecord, attribute_failure
+
+        task = {"reference_actions": [{"name": "create_repair_ticket", "arguments": {}}]}
+        res = TaskResult(task_id="X", variant="v", db_reward=0.0, nl_reward=1.0)
+        turn = TurnRecord(
+            user="u",
+            assistant_text=(
+                'tool_call>\n{"name": "create_repair_ticket", "arguments": {}}\n'
+                "</tool_call>"  # 闭合标签内含零宽字符
+            ),
+        )
+        res.turns.append(turn)
+        self.assertEqual(attribute_failure(task, res), "工具调用格式错误")
+
+    def test_successful_run_is_not_labelled_as_failure(self):
+        """成功运行即使残留了坏片段，也不该带失败标签（那是独立质量指标）。"""
+        from qwen_agent_bench.evaluator import TurnRecord, attribute_failure
+
+        task = {"reference_actions": []}
+        res = TaskResult(task_id="X", variant="v", db_reward=1.0, nl_reward=1.0)
+        res.turns.append(
+            TurnRecord(user="u", assistant_text='tool_call>{"name":"x"}</tool_call>')
+        )
+        self.assertEqual(attribute_failure(task, res), "unknown")
+
+    def test_broken_fragment_for_already_called_tool_is_harmless(self):
+        """片段提到的工具若已执行，只是无害冗余，不算格式错误。"""
+        from qwen_agent_bench.evaluator import TurnRecord, attribute_failure
+
+        task = {"reference_actions": []}
+        res = TaskResult(task_id="X", variant="v", db_reward=1.0, nl_reward=1.0)
+        turn = TurnRecord(user="u", assistant_text='tool_call>{"name":"find_customer_by_phone"}</tool_call>')
+        turn.tool_calls.append(("find_customer_by_phone", "{}"))
+        res.turns.append(turn)
+        self.assertEqual(attribute_failure(task, res), "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

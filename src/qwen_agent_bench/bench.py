@@ -201,6 +201,15 @@ def main() -> None:
                 "runaway_turns": r.runaway_turns,
                 "nl_details": r.nl_details,
                 "transcript": r.transcript,
+                "turns": [
+                    {
+                        "user": t.user,
+                        "assistant_text": t.assistant_text,
+                        "tool_calls": t.tool_calls,
+                        "tool_results": t.tool_results,
+                    }
+                    for t in r.turns
+                ],
                 "error": r.error,
             }
             for r in results
