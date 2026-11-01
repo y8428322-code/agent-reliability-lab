@@ -10,11 +10,36 @@ from qwen_agent_demo.model_factory import chat
 from .domain.db import MockDB
 from .domain.loader import load_policy_raw
 from .evaluator import TaskResult, TurnRecord, attribute_failure, db_reward, judge_all
-from .variants import build_agent, build_context, reflection_prompt
+from .variants import build_agent, build_context, reflection_prompt, variant_uses_reflection
 
 
 def _to_dict(msg: Any) -> Dict[str, Any]:
     return msg if isinstance(msg, dict) else msg.model_dump()
+
+
+def _normalize_args(raw: str) -> str:
+    """把工具参数规范化，用作去重键。
+
+    实测：模型在文本式 function calling 下有时会吐出**多余右括号**的参数，例如
+    `{"customer_id":"C1","fault_type":"断网"}}`。上游有容错解析能执行成功，但我们若直接
+    用原始字符串做键，同一次调用会因字符串不同被算成两次（工具调用数与失败归因都会失真）。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        return json.dumps(json.loads(text), sort_keys=True, ensure_ascii=False)
+    except Exception:  # noqa: BLE001
+        pass
+    # 去掉多余右括号再试一次
+    trimmed = text.rstrip()
+    while trimmed.endswith("}"):
+        candidate = trimmed[:-1]
+        try:
+            return json.dumps(json.loads(candidate), sort_keys=True, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            trimmed = candidate
+    return text
 
 
 def collect_turn(batches: List[List[Any]]) -> Tuple[List[Dict[str, str]], List[Tuple[str, str]], str]:
@@ -22,14 +47,15 @@ def collect_turn(batches: List[List[Any]]) -> Tuple[List[Dict[str, str]], List[T
 
     返回 (工具调用列表, 工具返回列表, 最终文本)。
 
-    三个坑（实测踩过）：
+    四个坑（实测踩过）：
       1. 上游是 `yield response + output`，**累积消息会被反复吐出**（同一个 function_call
          消息在每个流式 chunk 里重复出现），必须按唯一键去重；
       2. 上游的 `extra.function_id` **在多轮之间会重号**（每轮从 1 重新计数），
          不能用它做跨轮次的唯一键；
       3. 上游默认走 Nous **文本式** function calling（一次调用一条完整消息）；
          原生流式模式下同一次调用的 arguments 是**分片增量**，
-         因此用「同名且参数为严格前缀延长」判定为同一次调用的分片，否则算新调用。
+         因此用「同名且参数为严格前缀延长」判定为同一次调用的分片，否则算新调用；
+      4. 模型偶尔吐出**多余右括号**的 JSON 参数，去重键必须先规范化。
 
     去重规则：按唯一键保留**最后一次出现**（内容类消息保留最后一次累积值）。
     """
@@ -48,27 +74,37 @@ def collect_turn(batches: List[List[Any]]) -> Tuple[List[Dict[str, str]], List[T
                 cd = fc if isinstance(fc, dict) else fc.model_dump()
                 name = cd.get("name")
                 args = cd.get("arguments") or ""
+                key = (name, _normalize_args(args))
                 # 同名 + 参数为严格前缀延长 => 同一次调用在流式下的分片增量
                 merged = False
                 for back in range(len(calls) - 1, -1, -1):
                     prev = calls[back]
                     if prev["name"] != name:
                         continue
-                    if len(args) > len(prev["arguments"]) and args.startswith(prev["arguments"]):
+                    if len(args) > len(prev["raw"]) and args.startswith(prev["raw"]):
                         # 参数被补全 -> 去重索引的键也要同步，否则后续同一条消息
                         # 会因为「旧键已失效」被当成新调用重复计入
-                        call_index.pop((prev["name"], prev["arguments"]), None)
-                        prev["arguments"] = args
-                        call_index[(name, args)] = back
+                        call_index.pop((prev["name"], prev["key"]), None)
+                        prev["raw"] = args
+                        prev["key"] = _normalize_args(args)
+                        prev["arguments"] = prev["key"] or args
+                        call_index[(name, prev["key"])] = back
                         merged = True
                     break
                 if merged:
                     continue
-                # 完全相同的 (name, arguments) 是上游重复吐出的同一条消息，去重
-                if (name, args) in call_index:
+                # 完全相同的 (name, 规范化参数) 是上游重复吐出的同一条消息，去重
+                if key in call_index:
                     continue
-                call_index[(name, args)] = len(calls)
-                calls.append({"name": name, "arguments": args})
+                call_index[key] = len(calls)
+                calls.append(
+                    {
+                        "name": name,
+                        "arguments": _normalize_args(args) or args,
+                        "raw": args,
+                        "key": _normalize_args(args),
+                    }
+                )
                 continue
 
             role = data.get("role")
@@ -154,7 +190,7 @@ def run_task(
         user_msg = user_turns[turn_index]
         history.append({"role": "user", "content": user_msg})
 
-        if variant == "C_reflection" and reflection:
+        if variant_uses_reflection(variant) and reflection:
             # 反思结论注入下一轮：重建 agent（system_message 变化），历史通过 messages 传入
             agent, _tools = build_agent(variant, task, db, llm, reflection=reflection)
             reflection = ""
@@ -186,15 +222,15 @@ def run_task(
 
         history.extend(_history_entries(calls, results, final_text))
 
-        # C 变体：回合结束后做一次自省，为下一轮提供待办
-        if variant == "C_reflection" and turn_index < max_turns - 1:
+        # C / E 变体：回合结束后做一次自省，为下一轮提供待办（E 为双向）
+        if variant_uses_reflection(variant) and turn_index < max_turns - 1:
             transcript = "\n".join(
                 "用户: %s\n客服: %s" % (t.user, t.assistant_text) for t in result.turns
             )
             try:
                 reflection = chat(
                     cfg,
-                    [{"role": "user", "content": reflection_prompt(load_policy_raw(), transcript)}],
+                    [{"role": "user", "content": reflection_prompt(variant, load_policy_raw(), transcript)}],
                     temperature=0.0,
                     max_tokens=400,
                 )
@@ -221,6 +257,7 @@ def run_task(
         result.nl_reward = n_reward
         result.nl_details = details
 
+    result.audit = list(db.audit_log)
     result.reward = result.db_reward * result.nl_reward
     result.success = result.reward >= 1.0
     result.failure_mode = attribute_failure(task, result)

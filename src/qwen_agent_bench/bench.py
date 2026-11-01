@@ -196,6 +196,7 @@ def main() -> None:
                 "failure_mode": r.failure_mode,
                 "n_tool_calls": r.n_tool_calls,
                 "tool_errors": r.tool_errors,
+                "audit": r.audit,
                 "nl_details": r.nl_details,
                 "transcript": r.transcript,
                 "error": r.error,

@@ -44,6 +44,7 @@ class TaskResult:
     turns: List[TurnRecord] = field(default_factory=list)
     nl_details: List[Dict[str, Any]] = field(default_factory=list)
     tool_errors: List[str] = field(default_factory=list)
+    audit: List[Dict[str, Any]] = field(default_factory=list)
     failure_mode: str = ""
     reflection: str = ""
     n_llm_calls: int = 0
@@ -182,21 +183,88 @@ def judge_all(cfg, task: Dict[str, Any], transcript: str) -> Tuple[float, List[D
 # --------------------------------------------------------------------------
 # 失败模式归因
 # --------------------------------------------------------------------------
-def attribute_failure(task: Dict[str, Any], result: TaskResult) -> str:
-    """规则化失败归因（先用确定性规则，规则无法判定时返回 unknown）。"""
-    called = [name for turn in result.turns for name, _ in turn.tool_calls]
-    gold_calls = [a["name"] for a in (task.get("reference_actions") or [])]
+_WRITE_LABEL = {
+    "create_repair_ticket": "建单",
+    "replace_device": "换机",
+    "cancel_ticket": "撤单",
+    "offer_refund": "退款",
+}
 
+
+def _write_calls(task: Dict[str, Any], result: TaskResult) -> List[Tuple[str, Dict[str, Any]]]:
+    """agent 实际执行的写操作序列（名称 + 参数）。
+
+    **优先用 DB 的 audit_log** —— 那是工具自己写的执行记录，绝对权威；
+    我们从流式消息里重建的调用列表可能因为参数格式差异而重复计数。
+    """
+    if result.audit:
+        out: List[Tuple[str, Dict[str, Any]]] = []
+        for entry in result.audit:
+            action = entry.get("action")
+            if action in _WRITE_LABEL:
+                out.append((action, entry.get("args") or {}))
+        if out:
+            return out
+
+    out = []
+    for turn in result.turns:
+        for name, args_json in turn.tool_calls:
+            if name not in _WRITE_LABEL:
+                continue
+            try:
+                args = json.loads(args_json) if isinstance(args_json, str) else (args_json or {})
+            except Exception:  # noqa: BLE001
+                args = {}
+            out.append((name, args))
+    return out
+
+
+def _gold_writes(task: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for action in task.get("reference_actions") or []:
+        name = action.get("name")
+        if name in _WRITE_LABEL:
+            out.append((name, action.get("arguments") or {}))
+    return out
+
+
+def attribute_failure(task: Dict[str, Any], result: TaskResult) -> str:
+    """规则化失败归因。
+
+    返回可定位的字符串，例如：
+      - ``状态不符(多换机 x1)``   —— 做了 gold 没有的写操作（主失败模式：做多了）
+      - ``状态不符(漏建单 x1)``   —— 该做的没做
+      - ``换机选型错误``          —— 做了但参数选错
+      - ``未闭环``                —— DB 对但自然语言没告知到位
+    """
     if result.tool_errors:
         return "参数错"
-    if result.db_reward == 1.0 and result.nl_reward < 1.0:
-        return "未闭环"
-    if result.db_reward == 0.0:
-        write_calls = [c for c in called if c in ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund")]
-        gold_writes = [c for c in gold_calls if c in ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund")]
-        if gold_writes and not write_calls:
-            return "该办未办"
-        if write_calls and not gold_writes:
-            return "不该办却办了"
-        return "状态不符"
-    return "unknown"
+    if result.db_reward == 1.0:
+        return "未闭环" if result.nl_reward < 1.0 else "unknown"
+
+    gold = _gold_writes(task)
+    agent = _write_calls(task, result)
+
+    gold_names = [n for n, _ in gold]
+    agent_names = [n for n, _ in agent]
+
+    diffs: List[str] = []
+    for name in sorted(set(gold_names) | set(agent_names)):
+        d = agent_names.count(name) - gold_names.count(name)
+        if d > 0:
+            diffs.append("多%s x%d" % (_WRITE_LABEL[name], d))
+        elif d < 0:
+            diffs.append("少%s x%d" % (_WRITE_LABEL[name], -d))
+
+    # 同类写操作但参数不同（例如换机选错库存序列号、建单选错故障类型）
+    if not diffs:
+        for name in sorted(set(gold_names) & set(agent_names)):
+            g_args = [a for n, a in gold if n == name]
+            a_args = [a for n, a in agent if n == name]
+            if g_args != a_args:
+                diffs.append("%s参数不符" % _WRITE_LABEL[name])
+                break
+
+    if diffs:
+        return "状态不符(%s)" % ", ".join(diffs)
+    return "状态不符"

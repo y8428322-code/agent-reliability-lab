@@ -213,7 +213,15 @@ class CollectTurnTest(unittest.TestCase):
         ]
         calls, _, _ = collect_turn(batches)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["arguments"], '{"customer_id":"C1001","fault_type":"断网"}')
+        self.assertEqual(json.loads(calls[0]["arguments"]), {"customer_id": "C1001", "fault_type": "断网"})
+
+    def test_malformed_extra_brace_args_are_normalized(self):
+        """模型偶尔吐多余右括号，同一次调用不能因为字符串不同被算成两次。"""
+        a = _msg("assistant", "", {"name": "replace_device", "arguments": '{"customer_id":"C1","new_device_serial":"N001"}'})
+        b = _msg("assistant", "", {"name": "replace_device", "arguments": '{"customer_id":"C1","new_device_serial":"N001"}}'})
+        calls, _, _ = collect_turn([[a], [b]])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(json.loads(calls[0]["arguments"]), {"customer_id": "C1", "new_device_serial": "N001"})
 
     def test_distinct_calls_are_kept(self):
         batches = [
@@ -247,7 +255,7 @@ class CollectTurnTest(unittest.TestCase):
         ]
         calls, _, _ = collect_turn(batches)
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["arguments"], '{"phone":"13800001111"}')
+        self.assertEqual(json.loads(calls[0]["arguments"]), {"phone": "13800001111"})
         self.assertEqual(calls[1]["name"], "get_account_details")
 
     def test_final_text_taken_from_last_content(self):
@@ -302,6 +310,124 @@ class PolicyTest(unittest.TestCase):
     def test_digest_redline_mentions_refund_authority(self):
         ctx = build_digest_context([])
         self.assertIn("50", ctx)
+
+
+class VariantTest(unittest.TestCase):
+    def test_variant_ladder_flags(self):
+        from qwen_agent_bench.variants import (
+            variant_uses_bidirectional_reflection,
+            variant_uses_digest,
+            variant_uses_guard,
+            variant_uses_native,
+        )
+
+        self.assertFalse(variant_uses_digest("A_baseline"))
+        self.assertFalse(variant_uses_digest("A_native"))
+        self.assertTrue(variant_uses_digest("B_context"))
+        self.assertTrue(variant_uses_digest("D_guarded"))
+        self.assertTrue(variant_uses_digest("E_guarded_reflect"))
+
+        self.assertTrue(variant_uses_native("A_native"))
+        self.assertTrue(variant_uses_native("B_native"))
+        self.assertFalse(variant_uses_native("B_context"))
+
+        self.assertTrue(variant_uses_guard("D_guarded"))
+        self.assertTrue(variant_uses_guard("E_guarded_reflect"))
+        self.assertFalse(variant_uses_guard("C_reflection"))
+
+        self.assertTrue(variant_uses_bidirectional_reflection("E_guarded_reflect"))
+        self.assertFalse(variant_uses_bidirectional_reflection("C_reflection"))
+
+    def test_guard_system_only_in_guarded_variants(self):
+        from qwen_agent_bench.variants import build_context
+
+        task = {"policy_sections": ["redline"]}
+        self.assertNotIn("动作边界", build_context("B_context", task))
+        self.assertIn("动作边界", build_context("D_guarded", task))
+        self.assertIn("动作边界", build_context("E_guarded_reflect", task))
+
+    def test_guard_descriptions_only_touch_write_tools(self):
+        from qwen_agent_bench.domain.tools import build_tools
+        from qwen_agent_bench.variants import apply_guard_descriptions
+
+        tools = build_tools(MockDB())
+        before = {t.name: t.description for t in tools}
+        apply_guard_descriptions(tools)
+        for tool in tools:
+            has_guard = "调用前置条件" in tool.description
+            if tool.name in ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund"):
+                self.assertTrue(has_guard, tool.name)
+            else:
+                self.assertFalse(has_guard, tool.name)
+                self.assertEqual(tool.description, before[tool.name])
+
+    def test_reflection_prompt_is_bidirectional_only_for_e(self):
+        from qwen_agent_bench.variants import reflection_prompt
+
+        oneshot = reflection_prompt("C_reflection", "policy", "transcript")
+        both = reflection_prompt("E_guarded_reflect", "policy", "transcript")
+        self.assertIn("还没有被满足", oneshot)
+        self.assertNotIn("不该做而做了", oneshot)
+        self.assertIn("不该做而做了", both)
+        self.assertIn("该做而没做", both)
+
+
+class AttributionTest(unittest.TestCase):
+    """动作级失败归因：把「状态不符」变成可定位的原因。"""
+
+    def _result(self, calls, db_reward=0.0, nl_reward=1.0, tool_errors=None):
+        from qwen_agent_bench.evaluator import TaskResult, TurnRecord
+
+        res = TaskResult(task_id="X", variant="v", db_reward=db_reward, nl_reward=nl_reward)
+        res.tool_errors = list(tool_errors or [])
+        turn = TurnRecord(user="u", assistant_text="a")
+        turn.tool_calls = list(calls)
+        res.turns.append(turn)
+        return res
+
+    def test_extra_write_is_named(self):
+        from qwen_agent_bench.evaluator import attribute_failure
+
+        task = {"reference_actions": [{"name": "create_repair_ticket", "arguments": {}}]}
+        res = self._result(
+            [
+                ("create_repair_ticket", '{"customer_id":"C1","fault_type":"断网"}'),
+                ("replace_device", '{"customer_id":"C1"}'),
+            ]
+        )
+        self.assertEqual(attribute_failure(task, res), "状态不符(多换机 x1)")
+
+    def test_missing_write_is_named(self):
+        from qwen_agent_bench.evaluator import attribute_failure
+
+        task = {"reference_actions": [{"name": "create_repair_ticket", "arguments": {}}]}
+        res = self._result([])
+        self.assertEqual(attribute_failure(task, res), "状态不符(少建单 x1)")
+
+    def test_wrong_parameter_is_named(self):
+        from qwen_agent_bench.evaluator import attribute_failure
+
+        task = {
+            "reference_actions": [
+                {"name": "replace_device", "arguments": {"new_device_serial": "N001"}}
+            ]
+        }
+        res = self._result([("replace_device", '{"new_device_serial":"N004"}')])
+        self.assertEqual(attribute_failure(task, res), "状态不符(换机参数不符)")
+
+    def test_db_ok_but_nl_bad_is_unclosed(self):
+        from qwen_agent_bench.evaluator import attribute_failure
+
+        task = {"reference_actions": []}
+        res = self._result([], db_reward=1.0, nl_reward=0.5)
+        self.assertEqual(attribute_failure(task, res), "未闭环")
+
+    def test_tool_error_takes_precedence(self):
+        from qwen_agent_bench.evaluator import attribute_failure
+
+        task = {"reference_actions": []}
+        res = self._result([], tool_errors=["x: y"])
+        self.assertEqual(attribute_failure(task, res), "参数错")
 
 
 if __name__ == "__main__":
