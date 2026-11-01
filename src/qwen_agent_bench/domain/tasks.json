@@ -752,5 +752,64 @@
       "DB",
       "NL_ASSERTION"
     ]
+  },
+  {
+    "id": "T11",
+    "category": "repair",
+    "policy_sections": [
+      "redline",
+      "identity",
+      "repair",
+      "speech"
+    ],
+    "max_turns": 5,
+    "user_scenario": {
+      "persona": "用户描述了两个互相独立的故障现象",
+      "reason_for_call": "宽带既很慢又频繁掉线，需要分别受理",
+      "known_info": "姓名吴磊，手机号 13100010000",
+      "unknown_info": "不知道两个故障要分别建单"
+    },
+    "user_turns": [
+      "你好，我家网络特别慢，而且每隔几分钟就掉线一次，这两个毛病你都得给我报修",
+      "吴磊，手机号 13100010000",
+      "好的麻烦都处理一下",
+      "谢谢"
+    ],
+    "reference_actions": [
+      {
+        "name": "find_customer_by_phone",
+        "arguments": {
+          "phone": "13100010000"
+        }
+      },
+      {
+        "name": "check_service_status",
+        "arguments": {
+          "customer_id": "C1010"
+        }
+      },
+      {
+        "name": "create_repair_ticket",
+        "arguments": {
+          "customer_id": "C1010",
+          "fault_type": "慢速"
+        }
+      },
+      {
+        "name": "create_repair_ticket",
+        "arguments": {
+          "customer_id": "C1010",
+          "fault_type": "掉线"
+        }
+      }
+    ],
+    "nl_assertions": [
+      "回复中告知了工单号",
+      "回复中告知了 24 小时内上门"
+    ],
+    "reward_basis": [
+      "DB",
+      "NL_ASSERTION"
+    ]
   }
 ]

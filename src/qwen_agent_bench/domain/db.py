@@ -135,8 +135,43 @@ class MockDB:
 
     # ---------- 哈希 ----------
     def state_for_hash(self) -> Dict[str, Any]:
-        """参与哈希的状态切片（不含 audit_log）。"""
-        return {k: self.data.get(k) for k in HASHED_KEYS}
+        """参与哈希的状态切片（不含 audit_log）。
+
+        **工单与退款用「排序后的列表」而不是字典**：
+        它们的 id 是按创建顺序自动分配的（TK0003、TK0004……），
+        若 agent 与参考轨迹以**不同顺序**创建同样的工单，字典比较会因 id 不同而误判。
+        因此这里剔除自动 id，只按 (customer_id, fault_type, status, created_at) 等**业务字段**
+        排序比较——顺序无关，但重复仍会被发现（列表保留重复项）。
+        """
+        state: Dict[str, Any] = {}
+        for key in HASHED_KEYS:
+            value = self.data.get(key)
+            if key == "tickets":
+                state[key] = sorted(
+                    [
+                        [
+                            t.get("customer_id", ""),
+                            t.get("fault_type", ""),
+                            t.get("status", ""),
+                            t.get("created_at", ""),
+                        ]
+                        for t in (value or {}).values()
+                    ]
+                )
+            elif key == "refunds":
+                state[key] = sorted(
+                    [
+                        [
+                            r.get("customer_id", ""),
+                            r.get("amount", 0),
+                            r.get("status", ""),
+                        ]
+                        for r in (value or {}).values()
+                    ]
+                )
+            else:
+                state[key] = value
+        return state
 
     def hash(self) -> str:
         """状态哈希。同一状态必然同一哈希。"""

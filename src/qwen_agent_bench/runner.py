@@ -10,7 +10,13 @@ from qwen_agent_demo.model_factory import chat
 from .domain.db import MockDB
 from .domain.loader import load_policy_raw
 from .evaluator import TaskResult, TurnRecord, attribute_failure, db_reward, judge_all
-from .variants import build_agent, build_context, reflection_prompt, variant_uses_reflection
+from .variants import (
+    build_agent,
+    build_context,
+    policy_for_variant,
+    reflection_prompt,
+    variant_uses_reflection,
+)
 
 # 单轮工具调用数超过该阈值即视为「失控」（模型陷入重复生成）
 RUNAWAY_TOOL_CALL_THRESHOLD = 15
@@ -239,7 +245,14 @@ def run_task(
             try:
                 reflection = chat(
                     cfg,
-                    [{"role": "user", "content": reflection_prompt(variant, load_policy_raw(), transcript)}],
+                    [
+                        {
+                            "role": "user",
+                            "content": reflection_prompt(
+                                variant, policy_for_variant(variant, task), transcript
+                            ),
+                        }
+                    ],
                     temperature=0.0,
                     max_tokens=400,
                 )

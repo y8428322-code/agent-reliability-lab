@@ -123,15 +123,23 @@ def apply_guard_descriptions(tools: List[Any]) -> None:
             tool.description = tool.description + "\n" + line
 
 
+def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
+    """该变体使用的策略文本。
+
+    反思提示必须与 agent 上下文里的策略**同源**——否则反思依据的规则
+    和 agent 实际看到的规则不一致，反思结论可能指向 agent 并不在意的条款。
+    """
+    if variant_uses_digest(variant):
+        return build_digest_context(task.get("policy_sections") or [])
+    return load_policy_raw()
+
+
 def build_context(variant: str, task: Dict[str, Any], reflection: str = "") -> str:
     """构造 system message（上下文）。
 
     减法约束放在**最前面**（业务规范之前）—— 实测放在末尾时模型基本会忽略。
     """
-    if variant_uses_digest(variant):
-        policy = build_digest_context(task.get("policy_sections") or [])
-    else:
-        policy = load_policy_raw()
+    policy = policy_for_variant(variant, task)
 
     parts = [BASE_PERSONA]
     if variant_uses_guard(variant):

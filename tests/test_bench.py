@@ -194,6 +194,46 @@ class TaskSetTest(unittest.TestCase):
         reward, _, _ = db_reward(task, bad)
         self.assertEqual(reward, 0.0)
 
+    def test_ticket_creation_order_does_not_affect_hash(self):
+        """工单 id 按创建顺序分配，顺序不同不应被误判为状态不一致。"""
+        a = MockDB()
+        a.create_ticket("C1010", "慢速")
+        a.create_ticket("C1010", "掉线")
+        b = MockDB()
+        b.create_ticket("C1010", "掉线")
+        b.create_ticket("C1010", "慢速")
+        # id 与故障类型的对应关系确实不同
+        map_a = {tid: t["fault_type"] for tid, t in a.tickets.items()}
+        map_b = {tid: t["fault_type"] for tid, t in b.tickets.items()}
+        self.assertNotEqual(map_a, map_b)
+        self.assertEqual(a.hash(), b.hash())  # 但业务状态相同
+
+    def test_duplicate_ticket_is_still_detected(self):
+        """顺序无关不能掩盖「重复建单」——重复项要保留在比较里。"""
+        a = MockDB()
+        a.create_ticket("C1010", "慢速")
+        a.create_ticket("C1010", "掉线")
+        b = MockDB()
+        b.create_ticket("C1010", "慢速")
+        b.create_ticket("C1010", "慢速")
+        self.assertNotEqual(a.hash(), b.hash())
+
+    def test_task_set_has_positive_and_negative_gold(self):
+        base = MockDB().hash()
+        positive = [t for t in self.tasks if gold_hash(t)[0] != base]
+        negative = [t for t in self.tasks if gold_hash(t)[0] == base]
+        self.assertGreaterEqual(len(positive), 6)
+        self.assertGreaterEqual(len(negative), 6)
+
+    def test_multi_fault_task_expects_two_tickets(self):
+        """T11：两个独立故障现象 -> 按故障类型分别建单。"""
+        task = [t for t in self.tasks if t["id"] == "T11"][0]
+        db = MockDB()
+        replay_actions(db, task["reference_actions"])
+        own = [t for t in db.tickets.values() if t["customer_id"] == "C1010"]
+        self.assertEqual(len(own), 2)
+        self.assertEqual({t["fault_type"] for t in own}, {"掉线", "慢速"})
+
 
 class CollectTurnTest(unittest.TestCase):
     def test_dedupes_repeated_function_call_messages(self):

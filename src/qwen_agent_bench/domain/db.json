@@ -80,6 +80,15 @@
       "broadband_status": "故障",
       "device_serial": "D009",
       "warranty_until": "2027-10-10"
+    },
+    "C1010": {
+      "name": "吴磊",
+      "phone": "13100010000",
+      "level": "普通",
+      "account_status": "正常",
+      "broadband_status": "故障",
+      "device_serial": "D010",
+      "warranty_until": "2027-08-08"
     }
   },
   "devices": {
@@ -91,7 +100,8 @@
     "D006": { "model": "华为 HG8245H", "purchase_date": "2024-06-01" },
     "D007": { "model": "中兴 F601", "purchase_date": "2024-09-09" },
     "D008": { "model": "华为 HS8145V5", "purchase_date": "2024-12-15" },
-    "D009": { "model": "华为 HG8245H", "purchase_date": "2024-10-12" }
+    "D009": { "model": "华为 HG8245H", "purchase_date": "2024-10-12" },
+    "D010": { "model": "中兴 F601", "purchase_date": "2024-05-20" }
   },
   "inventory": {
     "N001": { "model": "华为 HG8245H", "type": "光猫" },
