@@ -13,7 +13,16 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List
 
-ORDER = ["A_baseline", "A_native", "B_context", "B_native", "C_reflection", "D_guarded", "E_guarded_reflect"]
+ORDER = [
+    "A_baseline",
+    "A_native",
+    "B_context",
+    "B_handwritten",
+    "B_native",
+    "C_reflection",
+    "D_guarded",
+    "E_guarded_reflect",
+]
 
 
 def pass_at_k(outcomes: List[bool], k: int) -> float:
