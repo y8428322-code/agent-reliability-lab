@@ -95,17 +95,26 @@ def main() -> None:
         print("%-20s %s" % (v, dict(fails) if fails else "无失败"))
 
     print()
-    print("工具调用与报错")
+    print("工具调用与报错（**中位数为主**：均值会被失控运行拉偏）")
     print("-" * 110)
-    print("%-20s %-14s %-14s %s" % ("变体", "平均工具调用", "平均工具报错", "有报错的运行数"))
+    print(
+        "%-20s %-12s %-12s %-12s %-14s %s"
+        % ("变体", "中位工具调用", "平均工具调用", "P90", "失控运行数", "有工具报错运行数")
+    )
     for v in variants:
         items = by_variant[v]
+        tc = sorted(r["n_tool_calls"] for r in items)
+        med = tc[len(tc) // 2]
+        p90 = tc[int(len(tc) * 0.9)]
+        runaway = sum(1 for r in items if r.get("runaway"))
         print(
-            "%-20s %-14.2f %-14.2f %d/%d"
+            "%-20s %-12.0f %-12.2f %-12.0f %-14s %d/%d"
             % (
                 v,
-                sum(r["n_tool_calls"] for r in items) / len(items),
-                sum(len(r.get("tool_errors", [])) for r in items) / len(items),
+                med,
+                sum(tc) / len(tc),
+                p90,
+                "%d/%d" % (runaway, len(items)),
                 sum(1 for r in items if r.get("tool_errors")),
                 len(items),
             )

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Tuple
 from qwen_agent.agents import Assistant
 from qwen_agent.llm.base import BaseChatModel
 
+from .compat import CompatAssistant
 from .domain.db import MockDB
 from .domain.loader import build_digest_context, load_policy_raw
 from .domain.tools import apply_enhanced_descriptions, baseline_descriptions, build_tools
@@ -158,7 +159,7 @@ def build_agent(
         apply_guard_descriptions(tools)
 
     system = build_context(variant, task, reflection)
-    agent = Assistant(
+    agent = CompatAssistant(
         llm=llm,
         name="telecom_cs",
         description="电信客服坐席",

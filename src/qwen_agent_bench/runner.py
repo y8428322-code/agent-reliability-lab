@@ -12,6 +12,9 @@ from .domain.loader import load_policy_raw
 from .evaluator import TaskResult, TurnRecord, attribute_failure, db_reward, judge_all
 from .variants import build_agent, build_context, reflection_prompt, variant_uses_reflection
 
+# 单轮工具调用数超过该阈值即视为「失控」（模型陷入重复生成）
+RUNAWAY_TOOL_CALL_THRESHOLD = 15
+
 
 def _to_dict(msg: Any) -> Dict[str, Any]:
     return msg if isinstance(msg, dict) else msg.model_dump()
@@ -205,6 +208,12 @@ def run_task(
 
         result.n_llm_calls += 1
         calls, results, final_text = collect_turn(batches)
+
+        # 失控检测：模型陷入重复生成时，单轮工具调用会异常膨胀。
+        # 标记出来而不是让它污染均值（v3 曾出现一次 137 次调用的离群运行）。
+        if len(calls) > RUNAWAY_TOOL_CALL_THRESHOLD:
+            result.runaway = True
+            result.runaway_turns.append(turn_index + 1)
 
         record = TurnRecord(user=user_msg, assistant_text=final_text)
         for call in calls:

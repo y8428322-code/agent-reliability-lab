@@ -45,6 +45,8 @@ class TaskResult:
     nl_details: List[Dict[str, Any]] = field(default_factory=list)
     tool_errors: List[str] = field(default_factory=list)
     audit: List[Dict[str, Any]] = field(default_factory=list)
+    runaway: bool = False
+    runaway_turns: List[int] = field(default_factory=list)
     failure_mode: str = ""
     reflection: str = ""
     n_llm_calls: int = 0

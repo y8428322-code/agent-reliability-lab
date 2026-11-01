@@ -197,6 +197,8 @@ def main() -> None:
                 "n_tool_calls": r.n_tool_calls,
                 "tool_errors": r.tool_errors,
                 "audit": r.audit,
+                "runaway": r.runaway,
+                "runaway_turns": r.runaway_turns,
                 "nl_details": r.nl_details,
                 "transcript": r.transcript,
                 "error": r.error,
