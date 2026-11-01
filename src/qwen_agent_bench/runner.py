@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from qwen_agent_demo.model_factory import chat
+from qwen_agent_demo.model_factory import chat, normalize_args as _normalize_args
 
 from .domain.db import MockDB
 from .domain.loader import load_policy_raw
@@ -24,31 +24,6 @@ RUNAWAY_TOOL_CALL_THRESHOLD = 15
 
 def _to_dict(msg: Any) -> Dict[str, Any]:
     return msg if isinstance(msg, dict) else msg.model_dump()
-
-
-def _normalize_args(raw: str) -> str:
-    """把工具参数规范化，用作去重键。
-
-    实测：模型在文本式 function calling 下有时会吐出**多余右括号**的参数，例如
-    `{"customer_id":"C1","fault_type":"断网"}}`。上游有容错解析能执行成功，但我们若直接
-    用原始字符串做键，同一次调用会因字符串不同被算成两次（工具调用数与失败归因都会失真）。
-    """
-    text = (raw or "").strip()
-    if not text:
-        return ""
-    try:
-        return json.dumps(json.loads(text), sort_keys=True, ensure_ascii=False)
-    except Exception:  # noqa: BLE001
-        pass
-    # 去掉多余右括号再试一次
-    trimmed = text.rstrip()
-    while trimmed.endswith("}"):
-        candidate = trimmed[:-1]
-        try:
-            return json.dumps(json.loads(candidate), sort_keys=True, ensure_ascii=False)
-        except Exception:  # noqa: BLE001
-            trimmed = candidate
-    return text
 
 
 def collect_turn(batches: List[List[Any]]) -> Tuple[List[Dict[str, str]], List[Tuple[str, str]], str]:

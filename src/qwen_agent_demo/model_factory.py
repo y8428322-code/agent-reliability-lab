@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from qwen_agent.llm import get_chat_model
@@ -13,6 +14,30 @@ from .config import ModelConfig
 
 class MissingApiKeyError(RuntimeError):
     """未找到可用的 API 密钥。"""
+
+
+def normalize_args(raw: Any) -> str:
+    """规范化工具参数（去掉模型偶尔吐出的多余右括号等）。
+
+    实测 MiniMax 在文本式 function calling 下有时会输出
+    `{"a":1}}` 这种多一个右括号的参数；上游有容错解析能执行成功，
+    但我们若直接用原始字符串做比对/展示，同一次调用会因字符串不同被当成两次。
+    """
+    text = (raw or "").strip() if isinstance(raw, str) else ""
+    if not text:
+        return ""
+    try:
+        return json.dumps(json.loads(text), sort_keys=True, ensure_ascii=False)
+    except Exception:  # noqa: BLE001
+        pass
+    trimmed = text
+    while trimmed.endswith("}"):
+        candidate = trimmed[:-1]
+        try:
+            return json.dumps(json.loads(candidate), sort_keys=True, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            trimmed = candidate
+    return text
 
 
 class CompatOAI(TextChatAtOAI):

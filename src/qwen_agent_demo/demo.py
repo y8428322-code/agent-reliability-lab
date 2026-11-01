@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from qwen_agent.agents import Assistant, GroupChat, ReActChat
 
 from .config import AppConfig, load_app_config
-from .model_factory import MissingApiKeyError, build_llm, check_endpoint
+from .model_factory import MissingApiKeyError, build_llm, check_endpoint, normalize_args
 from .tools import default_tools
 
 
@@ -58,6 +58,10 @@ def run_and_report(bot, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
                     call_args[name] = args
                 elif len(args) > len(call_args[name]):
                     call_args[name] = args
+                # 模型偶尔会吐出多余右括号的参数，规范化后再比对
+                normalized = normalize_args(call_args[name])
+                if normalized:
+                    call_args[name] = normalized
 
             content = _text_of(data.get("content"))
             if role == "function" and data.get("name"):
@@ -75,7 +79,7 @@ def run_and_report(bot, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
                             react_actions.append(act)
 
     for name in call_order:
-        print("  -> 调用工具 %s(%s)" % (name, call_args.get(name, "")))
+        print("  -> 调用工具 %s(%s)" % (name, normalize_args(call_args.get(name, ""))))
     for act in react_actions:
         print("  -> (ReAct 文本动作) %s" % act.replace("\n", " ")[:120])
     for name, content in tool_results:
