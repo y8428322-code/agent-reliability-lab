@@ -35,8 +35,16 @@ def pass_at_k(outcomes: List[bool], k: int) -> float:
 
 
 def main() -> None:
-    path = Path(sys.argv[1] if len(sys.argv) > 1 else "results/ablation_v3.json")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
+        args = ["results/ablation_v3.json"]
+    paths = [Path(a) for a in args]
+
+    data = {"model": "", "results": []}
+    for path in paths:
+        part = json.loads(path.read_text(encoding="utf-8"))
+        data["model"] = data["model"] or part.get("model", "")
+        data["results"].extend(part.get("results", []))
     results = data["results"]
 
     variants = [v for v in ORDER if any(r["variant"] == v for r in results)]
@@ -50,7 +58,7 @@ def main() -> None:
             tasks.append(r["task_id"])
 
     print("=" * 110)
-    print("变体总览   模型=%s   运行数=%d   任务数=%d" % (data.get("model"), len(results), len(tasks)))
+    print("变体总览   模型=%s   运行数=%d   任务数=%d   结果文件=%d" % (data.get("model"), len(results), len(tasks), len(paths)))
     print("=" * 110)
     header = "%-20s %-8s %-9s %-8s %-8s %-10s %-9s %s" % (
         "变体", "运行数", "pass@1", "pass^3", "DB", "NL", "工具调用", "判定异常")
