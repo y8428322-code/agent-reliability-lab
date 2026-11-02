@@ -570,8 +570,7 @@ class PolicyRenderTest(unittest.TestCase):
             policy_for_variant("B_crop_keepredline", task),
         )
 
-    def test_turn_guard_blocks_second_write_in_a_turn(self):
-        """机制约束：同一回合内第二个写操作必须被挡住，且不写库。"""
+    def _guard_tools(self):
         import json as _json
 
         from qwen_agent_bench.domain.tools import TurnGuard, build_tools
@@ -579,44 +578,101 @@ class PolicyRenderTest(unittest.TestCase):
         db = MockDB()
         guard = TurnGuard()
         tools = {t.name: t for t in build_tools(db, guard=guard)}
-        guard.begin_turn()
+        return db, guard, tools, _json
 
-        first = _json.loads(
+    def test_turn_guard_blocks_second_business_in_a_multi_business_turn(self):
+        """用户同一轮提了多个业务 -> 本轮只准办第一个。"""
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我家宽带断了，而且光猫也坏了，你直接给我换一台新的，顺便报修")
+
+        first = js.loads(
             tools["create_repair_ticket"].call(
-                _json.dumps({"customer_id": "C1001", "fault_type": "断网"})
+                js.dumps({"customer_id": "C1001", "fault_type": "断网"})
             )
         )
         self.assertTrue(first["ok"])
 
-        second = _json.loads(
+        second = js.loads(
             tools["replace_device"].call(
-                _json.dumps(
+                js.dumps(
                     {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
                 )
             )
         )
         self.assertFalse(second["ok"])
         self.assertIn("一次只办理一项业务", second["error"])
-        # 被挡住时不得写库
+        # 终止性语义：明确不是参数错误
+        self.assertIn("终止性", second["error"])
         self.assertEqual(db.customers["C1001"]["device_serial"], "D001")
 
-        # 读操作不受影响
-        read = _json.loads(
-            tools["check_service_status"].call(_json.dumps({"customer_id": "C1001"}))
+    def test_turn_guard_blocks_second_business_in_later_turn(self):
+        """跨回合：需用户单独确认的业务，在用户没单独提到时仍被挡（v8 的缺口）。"""
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我家宽带断了，而且光猫也坏了，你直接给我换一台新的，顺便报修")
+        js.loads(
+            tools["create_repair_ticket"].call(
+                js.dumps({"customer_id": "C1001", "fault_type": "断网"})
+            )
         )
-        self.assertTrue(read["ok"])
-
-        # 新回合重置后可再写一次
-        guard.begin_turn()
-        third = _json.loads(
+        # 下一轮用户没说换机
+        guard.begin_turn("好的麻烦快些")
+        blocked = js.loads(
             tools["replace_device"].call(
-                _json.dumps(
+                js.dumps(
                     {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
                 )
             )
         )
-        self.assertTrue(third["ok"])
-        self.assertEqual(db.customers["C1001"]["device_serial"], "N001")
+        self.assertFalse(blocked["ok"])
+        self.assertIn("需要用户单独确认", blocked["error"])
+
+        # 用户单独确认换机后 -> 放行
+        guard.begin_turn("对，那就换机吧")
+        allowed = js.loads(
+            tools["replace_device"].call(
+                js.dumps(
+                    {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
+                )
+            )
+        )
+        self.assertTrue(allowed["ok"])
+
+    def test_turn_guard_allows_single_business_across_turns(self):
+        """H2 场景：用户只提一个业务，下一轮补信息后才办 -> 必须放行。"""
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我这个光猫坏了，给我换一台新的吧")
+        guard.begin_turn("张伟，手机号 13800001111")
+        out = js.loads(
+            tools["replace_device"].call(
+                js.dumps(
+                    {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
+                )
+            )
+        )
+        self.assertTrue(out["ok"])
+
+    def test_turn_guard_allows_same_business_twice(self):
+        """T11 场景：同一业务（建单）可以多次，重复次数由策略里的具体规则管。"""
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我网络特别慢，而且每隔几分钟就掉线，这两个毛病你都得给我报修")
+        a = js.loads(
+            tools["create_repair_ticket"].call(
+                js.dumps({"customer_id": "C1001", "fault_type": "慢速"})
+            )
+        )
+        b = js.loads(
+            tools["create_repair_ticket"].call(
+                js.dumps({"customer_id": "C1001", "fault_type": "掉线"})
+            )
+        )
+        self.assertTrue(a["ok"])
+        self.assertTrue(b["ok"])
+
+    def test_read_tools_never_blocked(self):
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我要退款")
+        read = js.loads(tools["check_service_status"].call(js.dumps({"customer_id": "C1001"})))
+        self.assertTrue(read["ok"])
 
 
 class AttributionTest(unittest.TestCase):

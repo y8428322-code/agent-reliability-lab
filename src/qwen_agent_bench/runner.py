@@ -185,7 +185,7 @@ def run_task(
         user_msg = user_turns[turn_index]
         history.append({"role": "user", "content": user_msg})
         if guard is not None:
-            guard.begin_turn()
+            guard.begin_turn(user_msg)
 
         if variant_uses_reflection(variant) and reflection:
             # 反思结论注入下一轮：重建 agent（system_message 变化），历史通过 messages 传入

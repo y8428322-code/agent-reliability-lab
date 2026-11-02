@@ -23,44 +23,122 @@ MAX_REFUND_AMOUNT = 500.0
 # 会写库的写操作工具
 WRITE_TOOL_NAMES = ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund")
 
+# 写操作 -> 业务名（业务名用于判断"是不是同一件事"）
+WRITE_TOOL_BUSINESS = {
+    "create_repair_ticket": "报修工单",
+    "replace_device": "设备更换",
+    "cancel_ticket": "工单撤销",
+    "offer_refund": "退款",
+}
+
+# 业务名 -> 用户可能用的说法（用于判断用户本轮是否"单独提到"了这个业务）
+BUSINESS_KEYWORDS = {
+    "报修工单": ["报修", "维修", "派人上门", "上门修", "派工", "修一下", "派人来修", "上门维修"],
+    "设备更换": ["换机", "换一台", "换新的", "更换设备", "换设备", "换个新的", "换一台新的"],
+    "退款": ["退款", "退钱", "退我", "退给我", "退下"],
+    "工单撤销": ["撤单", "取消工单", "把工单取消", "撤销工单"],
+}
+
+# 终止性拒绝的固定措辞：必须明确表达"这不是参数错误、不要重试"
+_TERMINAL = "这是终止性拒绝，本回合不要再重试该业务。"
+
+
+def businesses_in_text(text: str) -> List[str]:
+    """从用户消息里识别提到的业务名（按关键词匹配）。"""
+    if not text:
+        return []
+    found: List[str] = []
+    for business, keywords in BUSINESS_KEYWORDS.items():
+        for kw in keywords:
+            if kw in text and business not in found:
+                found.append(business)
+                break
+    return found
+
 
 class TurnGuard:
-    """**机制约束**：同一回合内只允许一次写操作。
+    """**机制约束**：一次只办理一项业务。
 
-    背景（`docs/实验报告-v7.md`）：策略里写「一次只办一件事」是**文字禁令**，
-    实测 agent 会把它理解成「别多做事」——结果连必要的查询都不做了（tools=0），
-    从「过度执行」翻转成「该做不做」。
+    背景（`docs/实验报告-v7.md` / `v8.md`）：
+    - 「一次只办一件事」写成 prompt 里的**文字禁令**会被 agent 读成"别多做事"，
+      连必要的查询都不做了 → 从「过度执行」翻转成「该做不做」。
+    - 而实测 H9 的失败是**跨回合**的过度执行（第 1 回合办第一个诉求，
+      第 2 回合办第二个），单纯的"每回合一次写操作"压不住。
 
-    而实测 12 次 H9 失败**全部**是「同一回合内连续执行 建单 + 换机」两个写操作。
-    所以正确的做法是把这个约束从 prompt 挪到**工具层**：第二个写操作直接被挡住，
-    并给 agent 一句可转述给用户的话（先向用户说明并获得确认）。
+    所以约束落在**工具层**，且区分两种情形：
 
-    这属于「收紧可行域」，不是「增加禁令」——不增加 agent 的犹豫空间，
-    只是不给它一次回合里连做两件事的机会。
+    1. **用户在同一轮里提出了多个业务** → 本轮最多办一个，其余的记为
+       「需用户单独确认」，直到用户**在某一轮里单独提到它**为止。
+    2. **业务已在「需单独确认」状态** → 用户本轮没单独提到 → 拒绝。
+
+    这样能同时满足：
+    - H2（用户只提一个业务，下一轮才补信息）→ 放行 ✓
+    - H9（用户同轮提两个业务，第二轮只说"好的麻烦快些"）→ 拒绝 ✓
+
+    拒绝消息必须是**终止性**语义，与「工具参数错误」区分开 ——
+    否则 agent 会把它当成可纠正的参数错误反复重试（v8 实测因此出现 3 次「参数错」）。
     """
 
     def __init__(self) -> None:
-        self.writes: List[str] = []
+        self.done_businesses: List[str] = []       # 本会话已办理过的业务
+        self.need_confirm: List[str] = []          # 需用户单独确认的业务
+        self.turn_businesses: List[str] = []       # 用户本轮提到的业务
+        self.turn_handled: List[str] = []          # 本轮已办理的业务
 
-    def begin_turn(self) -> None:
-        """新回合开始，重置计数。"""
-        self.writes = []
+    # ---------- 每回合更新 ----------
+    def begin_turn(self, user_text: str = "") -> None:
+        """新回合开始：解析用户本轮提到的业务，更新「需单独确认」集合。"""
+        mentioned = businesses_in_text(user_text)
+        self.turn_businesses = mentioned
+        self.turn_handled = []
 
+        if len(mentioned) >= 2:
+            # 本轮用户提了多个业务 -> 这些业务都需要单独确认
+            for business in mentioned:
+                if business not in self.need_confirm:
+                    self.need_confirm.append(business)
+        elif len(mentioned) == 1:
+            # 用户单独提到了它 -> 视为确认
+            business = mentioned[0]
+            if business in self.need_confirm:
+                self.need_confirm.remove(business)
+
+    # ---------- 写操作检查 ----------
     def check(self, tool_name: str) -> Optional[str]:
-        """若该写操作不被允许，返回拒绝原因；否则返回 None。"""
+        """若该写操作不被允许，返回拒绝原因（终止性语义）；否则返回 None。"""
         if tool_name not in WRITE_TOOL_NAMES:
             return None
-        if self.writes:
+        business = WRITE_TOOL_BUSINESS[tool_name]
+
+        # 1) 本轮用户提了多个业务时，本轮最多办一个
+        if len(self.turn_businesses) >= 2:
+            if self.turn_handled and business not in self.turn_handled:
+                return (
+                    "本轮用户同时提出了多个业务（%s），一次只办理一项业务："
+                    "本轮已办理「%s」。请先向用户说明其它业务需其单独确认，"
+                    "在用户确认后的下一轮再办理。%s"
+                    % ("、".join(self.turn_businesses), self.turn_handled[0], _TERMINAL)
+                )
+
+        # 2) 该业务需用户单独确认，而用户本轮没有单独提到它
+        if business in self.need_confirm and business not in self.turn_businesses:
             return (
-                "本回合已办理「%s」。一次只办理一项业务："
-                "如需继续办理其它业务，请先向用户说明并获得用户确认后再操作。"
-                % self.writes[0]
+                "「%s」需要用户单独确认后才能办理（用户当轮同时提出了多个业务）。"
+                "请先向用户说明并获得其单独确认，在用户确认后的下一轮再办理。%s"
+                % (business, _TERMINAL)
             )
+
+        # 3) 同一业务已办理过 -> 允许（重复次数由策略里的具体规则约束，如「不重复建单」）
         return None
 
     def record(self, tool_name: str) -> None:
-        if tool_name in WRITE_TOOL_NAMES:
-            self.writes.append(tool_name)
+        if tool_name not in WRITE_TOOL_NAMES:
+            return
+        business = WRITE_TOOL_BUSINESS[tool_name]
+        if business not in self.done_businesses:
+            self.done_businesses.append(business)
+        if business not in self.turn_handled:
+            self.turn_handled.append(business)
 
 
 def _ok(**payload: Any) -> str:
