@@ -16,6 +16,10 @@ from typing import Any, Dict, List
 ORDER = [
     "A_baseline",
     "A_native",
+    "B_crop",
+    "B_points",
+    "B_crop_points",
+    "B_points_redline",
     "B_context",
     "B_handwritten",
     "B_native",
