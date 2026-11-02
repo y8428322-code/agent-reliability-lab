@@ -19,6 +19,8 @@ ORDER = [
     "B_crop",
     "B_points",
     "B_crop_points",
+    "B_crop_keepredline",
+    "B_crop_safe",
     "B_points_redline",
     "B_points_trunc",
     "B_context",

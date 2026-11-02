@@ -57,66 +57,107 @@ def render_structured(
     spec: Dict[str, Any],
     scenes: Optional[Sequence[str]] = None,
     redline_first: bool = True,
+    keep_redline: bool = True,
+    keep_universal: bool = True,
 ) -> str:
-    """结构化版：判据要点化 +（可选）红线前置 +（可选）按场景裁剪。
+    """结构化版：判据要点化 + 可选的场景裁剪 + 可选的红线/通用约束保留。
+
+    这里刻意把两件事**解耦**：
+
+    - **是否保留**（``keep_redline`` / ``keep_universal``）——决定这条规则会不会被场景裁掉
+    - **是否置顶**（``redline_first``）——只决定它在上下文里的位置
+
+    v6 之前把两者混在一起（``redline_first`` 一关，红线也跟着被裁），
+    导致"按场景裁剪"的伤害被严重高估、机制被误判。
 
     Args:
         scenes: 任务关心的分节 id。``None`` 表示全量。
-        redline_first: 是否把红线规则集中提到最前面。
+        redline_first: 保留块放在最前（True）还是最后（False）。
+        keep_redline: 红线规则是否**永不被裁掉**。
+        keep_universal: 跨场景通用约束（``universal: true``）是否**永不被裁掉**。
     """
     wanted = set(scenes or [])
     titles = {s["id"]: s["title"] for s in spec.get("sections", [])}
     rules = spec.get("rules", [])
 
-    parts: List[str] = []
+    always: List[Dict[str, Any]] = []
+    if keep_redline:
+        always.extend(r for r in rules if r.get("redline"))
+    if keep_universal:
+        always.extend(
+            r for r in rules if r.get("universal") and not r.get("redline")
+        )
+    always_ids = {id(r) for r in always}
 
-    if redline_first:
-        redlines = [r for r in rules if r.get("redline")]
-        if redlines:
-            parts.append("## 0. 红线（任何场景都适用，违反即判失败）")
-            for rule in redlines:
-                parts.append("")
-                parts.append("**%s %s**" % (rule["id"], rule["title"]))
-                for item in rule.get("criteria", []):
-                    parts.append("- %s" % item)
-            parts.append("")
+    def _block(items: List[Dict[str, Any]]) -> List[str]:
+        out: List[str] = []
+        for rule in items:
+            out.append("")
+            out.append("**%s %s**" % (rule["id"], rule["title"]))
+            for item in rule.get("criteria", []):
+                out.append("- %s" % item)
+        return out
 
+    head: List[str] = []
+    tail: List[str] = []
+    if always:
+        title = "## 0. 红线与通用约束（任何场景都适用）"
+        if redline_first:
+            head.append(title)
+            head.extend(_block(always))
+            head.append("")
+        else:
+            tail.append(title)
+            tail.extend(_block(always))
+            tail.append("")
+
+    body: List[str] = []
     by_cat = _rules_by_category(spec)
     for category, cat_rules in by_cat.items():
         if wanted and category not in wanted:
             continue
-        shown = [r for r in cat_rules if not (redline_first and r.get("redline"))]
+        shown = [r for r in cat_rules if id(r) not in always_ids]
         if not shown:
             continue
-        parts.append("## %s" % titles.get(category, category))
-        for rule in shown:
-            parts.append("")
-            parts.append("**%s %s**" % (rule["id"], rule["title"]))
-            for item in rule.get("criteria", []):
-                parts.append("- %s" % item)
-        parts.append("")
+        body.append("## %s" % titles.get(category, category))
+        body.extend(_block(shown))
+        body.append("")
 
-    return "\n".join(parts).strip()
+    if always and not redline_first:
+        pass
+
+    return "\n".join(head + body + tail).strip()
 
 
 def render(
     spec: Dict[str, Any],
     scenes: Optional[Sequence[str]] = None,
     points: bool = False,
-    redline_first: bool = False,
+    redline_first: bool = True,
+    keep_redline: bool = True,
+    keep_universal: bool = True,
 ) -> str:
-    """统一入口：把「上下文工程」的三个子机制做成**正交开关**。
+    """统一入口：把「上下文工程」的子机制做成**正交开关**。
 
     | 子机制 | 开关 | 含义 |
     |---|---|---|
     | 裁剪 | ``scenes`` 非空 | 只注入与本任务相关的规则 |
     | 要点化 | ``points=True`` | 规则呈现为要点列表，而不是长段落 |
-    | 红线前置 | ``redline_first=True`` | 红线规则集中置顶 |
+    | 置顶 | ``redline_first=True`` | 红线/通用约束块放在上下文最前 |
+    | **保红线** | ``keep_redline=True`` | 红线永不被场景裁掉 |
+    | **保通用约束** | ``keep_universal=True`` | 跨场景通用约束永不被裁掉 |
 
-    拆开这三个开关，才能回答「上下文工程里到底是哪一部分在起作用」。
+    「保留」与「置顶」是**两件事**：v6 之前把两者混在一起，
+    导致"按场景裁剪"的伤害被高估、机制被误判。
     """
     if points:
-        return render_structured(spec, scenes=scenes, redline_first=redline_first)
+        return render_structured(
+            spec,
+            scenes=scenes,
+            redline_first=redline_first,
+            keep_redline=keep_redline,
+            keep_universal=keep_universal,
+        )
     return render_narrative(spec, scenes=scenes)
 
 

@@ -493,7 +493,11 @@ class PolicyRenderTest(unittest.TestCase):
         self.assertNotEqual(auto, hand)
 
     def test_three_context_mechanisms_are_orthogonal(self):
-        """上下文工程的三个子机制必须能独立开关，否则无法归因。"""
+        """上下文工程的三个子机制必须能独立开关，否则无法归因。
+
+        注意：断言的是**呈现形式**而不是长度——长度会随规则集与措辞变化，
+        形式（要点 vs 段落、红线块位置、包含哪些分节）才是稳定的不变量。
+        """
         from qwen_agent_bench.variants import policy_for_variant
 
         task = {"policy_sections": ["redline", "identity", "repair", "speech"]}
@@ -502,17 +506,55 @@ class PolicyRenderTest(unittest.TestCase):
         points = policy_for_variant("B_points", task)
         full = policy_for_variant("B_context", task)
 
-        # 裁剪：只保留相关分节 → 比全量短
-        self.assertLess(len(crop), len(a))
+        # 裁剪：不含无关分节
         self.assertNotIn("工单撤销", crop)
-        # 要点化：出现要点符号，且比长叙述短
+        self.assertIn("故障受理", crop)
+        # 要点化：呈现为要点列表而非长段落
         self.assertIn("- ", points)
-        self.assertLess(len(points), len(a))
+        self.assertNotIn("- ", a)
         # 红线前置：红线块在最前
         self.assertTrue(full.startswith("## 0. 红线"))
         self.assertFalse(a.startswith("## 0. 红线"))
         # 四者互不相同
         self.assertEqual(len({a, crop, points, full}), 4)
+
+    def test_keep_and_position_are_decoupled(self):
+        """「是否保留」与「是否置顶」必须是两件事。
+
+        v6 之前把两者混在一起，导致「按场景裁剪」的伤害被高估、机制被误判。
+        """
+        from qwen_agent_bench.domain.render import load_policy_rules, render
+
+        spec = load_policy_rules()
+        scenes = ["identity", "device", "speech"]
+        top = render(spec, scenes=scenes, points=True, redline_first=True)
+        bottom = render(spec, scenes=scenes, points=True, redline_first=False)
+        self.assertTrue(top.startswith("## 0."))
+        self.assertFalse(bottom.startswith("## 0."))
+        # 两种位置下，红线内容都在
+        self.assertIn("R2", top)
+        self.assertIn("R2", bottom)
+
+    def test_cropping_strategies_differ_as_designed(self):
+        """三档裁剪策略必须真的不同：旧裁剪连红线一起裁，新裁剪红线与通用约束都不裁。"""
+        from qwen_agent_bench.variants import policy_for_variant
+
+        task = {"policy_sections": ["redline", "identity", "device", "speech"]}
+        old = policy_for_variant("B_crop_points", task)
+        mid = policy_for_variant("B_crop_keepredline", task)
+        safe = policy_for_variant("B_crop_safe", task)
+
+        r2 = "先查账户/宽带状态"          # R2 红线（category=repair，本场景不含）
+        r15 = "不代替用户做未经确认的决定"  # R15 通用约束（category=multi，本场景不含）
+
+        self.assertNotIn(r2, old)
+        self.assertNotIn(r15, old)
+        self.assertIn(r2, mid)
+        self.assertNotIn(r15, mid)
+        self.assertIn(r2, safe)
+        self.assertIn(r15, safe)
+        self.assertLess(len(old), len(mid))
+        self.assertLess(len(mid), len(safe))
 
 
 class AttributionTest(unittest.TestCase):

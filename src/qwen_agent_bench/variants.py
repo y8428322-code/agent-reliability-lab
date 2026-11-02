@@ -32,7 +32,9 @@ VARIANTS = [
     "A_native",           # 同上，但走原生 function calling
     "B_crop",             # **只裁剪**（按场景），仍是长段落
     "B_points",           # **只要点化**（全量规则要点化），不裁剪、不红线前置
-    "B_crop_points",      # 裁剪 + 要点化，**不**红线前置（用于单独隔离「裁剪」的效应）
+    "B_crop_points",      # 旧裁剪：严格按场景裁，连红线一起裁（v6 的做法）
+    "B_crop_keepredline", # 中间裁剪：红线不裁、通用约束裁
+    "B_crop_safe",        # 新裁剪：按规则强度分层，红线与通用约束都不裁
     "B_points_redline",   # 要点化 + 红线前置，**不**裁剪（用于单独隔离「红线前置」的效应）
     "B_points_trunc",     # **等长对照**：全量要点化但截断到与裁剪版等长
     "B_context",          # 裁剪 + 要点化 + 红线前置（= 完整上下文工程）
@@ -156,7 +158,17 @@ def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
     if variant == "B_points":
         return render(spec, scenes=None, points=True, redline_first=False)
     if variant == "B_crop_points":
-        return render(spec, scenes=scenes, points=True, redline_first=False)
+        # **旧裁剪策略**：严格按场景相关性裁，连红线一起裁掉（v6 的做法）
+        return render(spec, scenes=scenes, points=True, redline_first=False,
+                     keep_redline=False, keep_universal=False)
+    if variant == "B_crop_keepredline":
+        # **中间策略**：红线不裁，通用约束裁
+        return render(spec, scenes=scenes, points=True, redline_first=True,
+                     keep_redline=True, keep_universal=False)
+    if variant == "B_crop_safe":
+        # **新裁剪策略**：按规则强度分层 —— 红线与跨场景通用约束都不裁
+        return render(spec, scenes=scenes, points=True, redline_first=True,
+                     keep_redline=True, keep_universal=True)
     if variant == "B_points_redline":
         return render(spec, scenes=None, points=True, redline_first=True)
     if variant == "B_points_trunc":
