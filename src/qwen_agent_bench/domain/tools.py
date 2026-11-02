@@ -33,7 +33,7 @@ WRITE_TOOL_BUSINESS = {
 
 # 业务名 -> 用户可能用的说法（用于判断用户本轮是否"单独提到"了这个业务）
 BUSINESS_KEYWORDS = {
-    "报修工单": ["报修", "维修", "派人上门", "上门修", "派工", "修一下", "派人来修", "上门维修"],
+    "报修工单": ["报修", "报个修", "维修", "派人上门", "上门修", "派工", "修一下", "派人来修", "上门维修"],
     "设备更换": ["换机", "换一台", "换新的", "更换设备", "换设备", "换个新的", "换一台新的"],
     "退款": ["退款", "退钱", "退我", "退给我", "退下"],
     "工单撤销": ["撤单", "取消工单", "把工单取消", "撤销工单"],
@@ -44,16 +44,20 @@ _TERMINAL = "这是终止性拒绝，本回合不要再重试该业务。"
 
 
 def businesses_in_text(text: str) -> List[str]:
-    """从用户消息里识别提到的业务名（按关键词匹配）。"""
+    """从用户消息里识别提到的业务名，**按它们在文本中出现的先后排序**。
+
+    顺序很重要：守卫要挡的是「用户先提的那个业务之外的其它业务」，
+    所以必须知道用户**先**提了哪个。
+    """
     if not text:
         return []
-    found: List[str] = []
+    hits: List[Tuple[int, str]] = []
     for business, keywords in BUSINESS_KEYWORDS.items():
-        for kw in keywords:
-            if kw in text and business not in found:
-                found.append(business)
-                break
-    return found
+        positions = [text.find(kw) for kw in keywords if kw in text]
+        if positions:
+            hits.append((min(positions), business))
+    hits.sort()
+    return [business for _, business in hits]
 
 
 class TurnGuard:
@@ -110,14 +114,15 @@ class TurnGuard:
             return None
         business = WRITE_TOOL_BUSINESS[tool_name]
 
-        # 1) 本轮用户提了多个业务时，本轮最多办一个
+        # 1) 本轮用户提了多个业务时，本轮**只允许办理用户先提出的那个**
         if len(self.turn_businesses) >= 2:
-            if self.turn_handled and business not in self.turn_handled:
+            first = self.turn_businesses[0]
+            if business != first:
                 return (
                     "本轮用户同时提出了多个业务（%s），一次只办理一项业务："
-                    "本轮已办理「%s」。请先向用户说明其它业务需其单独确认，"
-                    "在用户确认后的下一轮再办理。%s"
-                    % ("、".join(self.turn_businesses), self.turn_handled[0], _TERMINAL)
+                    "本轮只能办理用户先提出的「%s」。请先办理「%s」，"
+                    "其余业务需用户单独确认后再办。%s"
+                    % ("、".join(self.turn_businesses), first, first, _TERMINAL)
                 )
 
         # 2) 该业务需用户单独确认，而用户本轮没有单独提到它

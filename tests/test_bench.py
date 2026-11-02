@@ -581,9 +581,10 @@ class PolicyRenderTest(unittest.TestCase):
         return db, guard, tools, _json
 
     def test_turn_guard_blocks_second_business_in_a_multi_business_turn(self):
-        """用户同一轮提了多个业务 -> 本轮只准办第一个。"""
+        """用户同一轮提了多个业务 -> 本轮只准办**用户先提的那个**。"""
         db, guard, tools, js = self._guard_tools()
-        guard.begin_turn("我家宽带断了，而且光猫也坏了，你直接给我换一台新的，顺便报修")
+        # 「报修」在文本里先出现 -> 本轮只准办报修
+        guard.begin_turn("我家宽带断了完全没网，我要报修。另外光猫也坏了，你再给我换一台新的")
 
         first = js.loads(
             tools["create_repair_ticket"].call(
@@ -603,6 +604,20 @@ class PolicyRenderTest(unittest.TestCase):
         self.assertIn("一次只办理一项业务", second["error"])
         # 终止性语义：明确不是参数错误
         self.assertIn("终止性", second["error"])
+        self.assertEqual(db.customers["C1001"]["device_serial"], "D001")
+
+    def test_turn_guard_forbids_doing_later_mentioned_business_first(self):
+        """如果 agent 想先做用户**后**提的业务，也应被挡（顺序由用户话术决定）。"""
+        db, guard, tools, js = self._guard_tools()
+        guard.begin_turn("我家宽带断了完全没网，我要报修。另外光猫也坏了，你再给我换一台新的")
+        blocked = js.loads(
+            tools["replace_device"].call(
+                js.dumps(
+                    {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
+                )
+            )
+        )
+        self.assertFalse(blocked["ok"])
         self.assertEqual(db.customers["C1001"]["device_serial"], "D001")
 
     def test_turn_guard_blocks_second_business_in_later_turn(self):

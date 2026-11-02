@@ -44,6 +44,7 @@ class TaskResult:
     turns: List[TurnRecord] = field(default_factory=list)
     nl_details: List[Dict[str, Any]] = field(default_factory=list)
     tool_errors: List[str] = field(default_factory=list)
+    guard_rejections: List[str] = field(default_factory=list)
     audit: List[Dict[str, Any]] = field(default_factory=list)
     runaway: bool = False
     runaway_turns: List[int] = field(default_factory=list)
@@ -305,6 +306,8 @@ def attribute_failure(task: Dict[str, Any], result: TaskResult) -> str:
       - ``工具调用格式错误``      —— 模型写了 tool_call 但格式坏了，工具没执行
       - ``未闭环``                —— DB 对但自然语言没告知到位
     """
+    if result.guard_rejections:
+        return "机制拒绝"
     if result.tool_errors:
         return "参数错"
 
