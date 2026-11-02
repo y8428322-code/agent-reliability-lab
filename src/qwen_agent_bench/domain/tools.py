@@ -20,6 +20,48 @@ CANCEL_REASONS = ["用户取消", "重复报修", "客户改约"]
 REFUND_REASONS = ["设备故障", "网络故障", "重复扣费"]
 MAX_REFUND_AMOUNT = 500.0
 
+# 会写库的写操作工具
+WRITE_TOOL_NAMES = ("create_repair_ticket", "replace_device", "cancel_ticket", "offer_refund")
+
+
+class TurnGuard:
+    """**机制约束**：同一回合内只允许一次写操作。
+
+    背景（`docs/实验报告-v7.md`）：策略里写「一次只办一件事」是**文字禁令**，
+    实测 agent 会把它理解成「别多做事」——结果连必要的查询都不做了（tools=0），
+    从「过度执行」翻转成「该做不做」。
+
+    而实测 12 次 H9 失败**全部**是「同一回合内连续执行 建单 + 换机」两个写操作。
+    所以正确的做法是把这个约束从 prompt 挪到**工具层**：第二个写操作直接被挡住，
+    并给 agent 一句可转述给用户的话（先向用户说明并获得确认）。
+
+    这属于「收紧可行域」，不是「增加禁令」——不增加 agent 的犹豫空间，
+    只是不给它一次回合里连做两件事的机会。
+    """
+
+    def __init__(self) -> None:
+        self.writes: List[str] = []
+
+    def begin_turn(self) -> None:
+        """新回合开始，重置计数。"""
+        self.writes = []
+
+    def check(self, tool_name: str) -> Optional[str]:
+        """若该写操作不被允许，返回拒绝原因；否则返回 None。"""
+        if tool_name not in WRITE_TOOL_NAMES:
+            return None
+        if self.writes:
+            return (
+                "本回合已办理「%s」。一次只办理一项业务："
+                "如需继续办理其它业务，请先向用户说明并获得用户确认后再操作。"
+                % self.writes[0]
+            )
+        return None
+
+    def record(self, tool_name: str) -> None:
+        if tool_name in WRITE_TOOL_NAMES:
+            self.writes.append(tool_name)
+
 
 def _ok(**payload: Any) -> str:
     return json.dumps({"ok": True, **payload}, ensure_ascii=False)
@@ -32,9 +74,20 @@ def _err(message: str, **payload: Any) -> str:
 class _DbTool(BaseTool):
     """带数据库引用的工具基类。"""
 
-    def __init__(self, db: MockDB) -> None:
+    def __init__(self, db: MockDB, guard: Optional["TurnGuard"] = None) -> None:
         super().__init__(None)
         self.db = db
+        self.guard = guard
+
+    def _guard_block(self, tool_name: str) -> Optional[str]:
+        """机制约束检查：返回拒绝原因（None 表示放行）。"""
+        if self.guard is None:
+            return None
+        return self.guard.check(tool_name)
+
+    def _guard_record(self, tool_name: str) -> None:
+        if self.guard is not None:
+            self.guard.record(tool_name)
 
 
 class FindCustomerByPhone(_DbTool):
@@ -183,7 +236,11 @@ class CreateRepairTicket(_DbTool):
         fault_type = str(args["fault_type"]).strip()
         if cid not in self.db.customers:
             return _err("客户编号不存在，不能建单", customer_id=cid)
+        blocked = self._guard_block("create_repair_ticket")
+        if blocked:
+            return _err(blocked)
         ticket_id = self.db.create_ticket(cid, fault_type)
+        self._guard_record("create_repair_ticket")
         return _ok(ticket_id=ticket_id, customer_id=cid, fault_type=fault_type, sla="24小时内上门")
 
 
@@ -222,7 +279,11 @@ class ReplaceDevice(_DbTool):
             )
         if new not in self.db.inventory:
             return _err("新设备序列号不在库存清单中", new_device_serial=new)
+        blocked = self._guard_block("replace_device")
+        if blocked:
+            return _err(blocked)
         self.db.replace_device(cid, old, new)
+        self._guard_record("replace_device")
         return _ok(customer_id=cid, old_device_serial=old, new_device_serial=new, warranty_until=cust["warranty_until"])
 
 
@@ -259,7 +320,11 @@ class CancelTicket(_DbTool):
                 ticket_id=ticket_id,
                 status=ticket["status"],
             )
+        blocked = self._guard_block("cancel_ticket")
+        if blocked:
+            return _err(blocked)
         self.db.cancel_ticket(ticket_id, reason)
+        self._guard_record("cancel_ticket")
         return _ok(ticket_id=ticket_id, status="已撤销", reason=reason)
 
 
@@ -299,7 +364,11 @@ class OfferRefund(_DbTool):
                 amount=amount,
                 limit=MAX_REFUND_AMOUNT,
             )
+        blocked = self._guard_block("offer_refund")
+        if blocked:
+            return _err(blocked)
         refund_id = self.db.create_refund(cid, amount, reason)
+        self._guard_record("offer_refund")
         return _ok(refund_id=refund_id, customer_id=cid, amount=amount)
 
 
@@ -362,9 +431,13 @@ TOOL_CLASSES = [
 ]
 
 
-def build_tools(db: MockDB) -> List[_DbTool]:
-    """构造绑定到指定数据库的工具实例。"""
-    return [cls(db) for cls in TOOL_CLASSES]
+def build_tools(db: MockDB, guard: Optional["TurnGuard"] = None) -> List[_DbTool]:
+    """构造绑定到指定数据库的工具实例。
+
+    Args:
+        guard: 机制约束守卫；``None`` 表示不启用（即 v6/v7 的行为）。
+    """
+    return [cls(db, guard) for cls in TOOL_CLASSES]
 
 
 def tool_names() -> List[str]:

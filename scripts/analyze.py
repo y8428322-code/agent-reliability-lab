@@ -21,6 +21,7 @@ ORDER = [
     "B_crop_points",
     "B_crop_keepredline",
     "B_crop_safe",
+    "B_guard",
     "B_points_redline",
     "B_points_trunc",
     "B_context",
@@ -180,6 +181,8 @@ def main() -> None:
         ("B_crop_points", "B_crop_keepredline"),
         ("B_crop_keepredline", "B_crop_safe"),
         ("B_crop_points", "B_crop_safe"),
+        # 机制约束（工具层）：与 keepredline 只差这一个变量
+        ("B_crop_keepredline", "B_guard"),
     ]
     print("%-34s %-10s %-10s %s" % ("对比", "左赢", "右赢", "净"))
     for left, right in pairs:

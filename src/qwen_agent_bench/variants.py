@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from qwen_agent.agents import Assistant
 from qwen_agent.llm.base import BaseChatModel
@@ -25,7 +25,12 @@ from .compat import CompatAssistant
 from .domain.db import MockDB
 from .domain.loader import load_policy_digest
 from .domain.render import load_policy_rules, render
-from .domain.tools import apply_enhanced_descriptions, baseline_descriptions, build_tools
+from .domain.tools import (
+    TurnGuard,
+    apply_enhanced_descriptions,
+    baseline_descriptions,
+    build_tools,
+)
 
 VARIANTS = [
     "A_baseline",         # 长叙述版 policy（全量、无要点化、无红线前置）
@@ -35,6 +40,7 @@ VARIANTS = [
     "B_crop_points",      # 旧裁剪：严格按场景裁，连红线一起裁（v6 的做法）
     "B_crop_keepredline", # 中间裁剪：红线不裁、通用约束裁
     "B_crop_safe",        # 新裁剪：按规则强度分层，红线与通用约束都不裁
+    "B_guard",            # 同 B_crop_keepredline + **机制约束**（工具层：一回合只准一次写操作）
     "B_points_redline",   # 要点化 + 红线前置，**不**裁剪（用于单独隔离「红线前置」的效应）
     "B_points_trunc",     # **等长对照**：全量要点化但截断到与裁剪版等长
     "B_context",          # 裁剪 + 要点化 + 红线前置（= 完整上下文工程）
@@ -107,8 +113,8 @@ def variant_uses_native(variant: str) -> bool:
     return variant.endswith("_native")
 
 
-def variant_uses_guard(variant: str) -> bool:
-    """是否启用减法机制（D / E）。"""
+def variant_uses_prompt_guard(variant: str) -> bool:
+    """是否启用 **prompt 级**减法机制（D / E：系统提示里加「动作边界」）。"""
     return variant.startswith("D_") or variant.startswith("E_")
 
 
@@ -165,6 +171,10 @@ def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
         # **中间策略**：红线不裁，通用约束裁
         return render(spec, scenes=scenes, points=True, redline_first=True,
                      keep_redline=True, keep_universal=False)
+    if variant == "B_guard":
+        # 与 B_crop_keepredline **完全相同的策略**，只多一个工具层机制约束
+        return render(spec, scenes=scenes, points=True, redline_first=True,
+                     keep_redline=True, keep_universal=False)
     if variant == "B_crop_safe":
         # **新裁剪策略**：按规则强度分层 —— 红线与跨场景通用约束都不裁
         return render(spec, scenes=scenes, points=True, redline_first=True,
@@ -190,12 +200,21 @@ def build_context(variant: str, task: Dict[str, Any], reflection: str = "") -> s
     policy = policy_for_variant(variant, task)
 
     parts = [BASE_PERSONA]
-    if variant_uses_guard(variant):
+    if variant_uses_prompt_guard(variant):
         parts.extend(["", GUARD_SYSTEM])
     parts.extend(["", "【业务规范】", policy])
     if reflection:
         parts.extend(["", "【上一轮的自查结论（请务必逐条落实）】", reflection])
     return "\n".join(parts)
+
+
+def variant_uses_mechanism_guard(variant: str) -> bool:
+    """是否启用**机制约束**（工具层：一回合只准一次写操作）。
+
+    与 prompt 级的 `variant_uses_prompt_guard` 是两回事：
+    前者靠文字禁令（会被模型读成「别多做事」），后者靠工具层拦截（收紧可行域）。
+    """
+    return variant == "B_guard"
 
 
 def build_agent(
@@ -204,14 +223,15 @@ def build_agent(
     db: MockDB,
     llm: BaseChatModel,
     reflection: str = "",
+    guard: Optional[TurnGuard] = None,
 ) -> Tuple[Assistant, List[Any]]:
     """按变体构造 agent 与工具实例。"""
-    tools = build_tools(db)
+    tools = build_tools(db, guard=guard)
     if variant_uses_digest(variant):
         apply_enhanced_descriptions(tools)
     else:
         baseline_descriptions(tools)
-    if variant_uses_guard(variant):
+    if variant_uses_prompt_guard(variant):
         apply_guard_descriptions(tools)
 
     system = build_context(variant, task, reflection)

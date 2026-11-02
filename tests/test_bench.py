@@ -357,8 +357,9 @@ class VariantTest(unittest.TestCase):
         from qwen_agent_bench.variants import (
             variant_uses_bidirectional_reflection,
             variant_uses_digest,
-            variant_uses_guard,
+            variant_uses_mechanism_guard,
             variant_uses_native,
+            variant_uses_prompt_guard,
         )
 
         self.assertFalse(variant_uses_digest("A_baseline"))
@@ -371,9 +372,12 @@ class VariantTest(unittest.TestCase):
         self.assertTrue(variant_uses_native("B_native"))
         self.assertFalse(variant_uses_native("B_context"))
 
-        self.assertTrue(variant_uses_guard("D_guarded"))
-        self.assertTrue(variant_uses_guard("E_guarded_reflect"))
-        self.assertFalse(variant_uses_guard("C_reflection"))
+        # prompt 级减法（D/E）与工具级机制约束（B_guard）是两回事，不能混用同一个函数名
+        self.assertTrue(variant_uses_prompt_guard("D_guarded"))
+        self.assertTrue(variant_uses_prompt_guard("E_guarded_reflect"))
+        self.assertFalse(variant_uses_prompt_guard("B_guard"))
+        self.assertTrue(variant_uses_mechanism_guard("B_guard"))
+        self.assertFalse(variant_uses_mechanism_guard("D_guarded"))
 
         self.assertTrue(variant_uses_bidirectional_reflection("E_guarded_reflect"))
         self.assertFalse(variant_uses_bidirectional_reflection("C_reflection"))
@@ -536,7 +540,7 @@ class PolicyRenderTest(unittest.TestCase):
         self.assertIn("R2", bottom)
 
     def test_cropping_strategies_differ_as_designed(self):
-        """三档裁剪策略必须真的不同：旧裁剪连红线一起裁，新裁剪红线与通用约束都不裁。"""
+        """三档裁剪策略必须真的不同：旧裁剪连红线一起裁，中/新裁剪都保住红线。"""
         from qwen_agent_bench.variants import policy_for_variant
 
         task = {"policy_sections": ["redline", "identity", "device", "speech"]}
@@ -545,16 +549,74 @@ class PolicyRenderTest(unittest.TestCase):
         safe = policy_for_variant("B_crop_safe", task)
 
         r2 = "先查账户/宽带状态"          # R2 红线（category=repair，本场景不含）
-        r15 = "不代替用户做未经确认的决定"  # R15 通用约束（category=multi，本场景不含）
+        r15 = "不代替用户做未经确认的决定"  # R15（category=multi，本场景不含）
 
+        # 旧裁剪：红线被一起裁掉
         self.assertNotIn(r2, old)
         self.assertNotIn(r15, old)
+        # 中/新裁剪：红线保住
         self.assertIn(r2, mid)
-        self.assertNotIn(r15, mid)
         self.assertIn(r2, safe)
-        self.assertIn(r15, safe)
         self.assertLess(len(old), len(mid))
-        self.assertLess(len(mid), len(safe))
+
+    def test_guard_variant_shares_policy_with_keepredline(self):
+        """B_guard 与 B_crop_keepredline 的**策略必须完全相同**，
+        这样「机制约束」才是唯一变量。"""
+        from qwen_agent_bench.variants import policy_for_variant
+
+        task = {"policy_sections": ["redline", "identity", "device", "speech"]}
+        self.assertEqual(
+            policy_for_variant("B_guard", task),
+            policy_for_variant("B_crop_keepredline", task),
+        )
+
+    def test_turn_guard_blocks_second_write_in_a_turn(self):
+        """机制约束：同一回合内第二个写操作必须被挡住，且不写库。"""
+        import json as _json
+
+        from qwen_agent_bench.domain.tools import TurnGuard, build_tools
+
+        db = MockDB()
+        guard = TurnGuard()
+        tools = {t.name: t for t in build_tools(db, guard=guard)}
+        guard.begin_turn()
+
+        first = _json.loads(
+            tools["create_repair_ticket"].call(
+                _json.dumps({"customer_id": "C1001", "fault_type": "断网"})
+            )
+        )
+        self.assertTrue(first["ok"])
+
+        second = _json.loads(
+            tools["replace_device"].call(
+                _json.dumps(
+                    {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
+                )
+            )
+        )
+        self.assertFalse(second["ok"])
+        self.assertIn("一次只办理一项业务", second["error"])
+        # 被挡住时不得写库
+        self.assertEqual(db.customers["C1001"]["device_serial"], "D001")
+
+        # 读操作不受影响
+        read = _json.loads(
+            tools["check_service_status"].call(_json.dumps({"customer_id": "C1001"}))
+        )
+        self.assertTrue(read["ok"])
+
+        # 新回合重置后可再写一次
+        guard.begin_turn()
+        third = _json.loads(
+            tools["replace_device"].call(
+                _json.dumps(
+                    {"customer_id": "C1001", "device_serial": "D001", "new_device_serial": "N001"}
+                )
+            )
+        )
+        self.assertTrue(third["ok"])
+        self.assertEqual(db.customers["C1001"]["device_serial"], "N001")
 
 
 class AttributionTest(unittest.TestCase):

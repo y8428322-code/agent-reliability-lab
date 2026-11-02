@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from qwen_agent_demo.model_factory import chat, normalize_args as _normalize_args
 
 from .domain.db import MockDB
+from .domain.tools import TurnGuard
 from .domain.loader import load_policy_raw
 from .evaluator import (
     TaskResult,
@@ -22,6 +23,7 @@ from .variants import (
     build_context,
     policy_for_variant,
     reflection_prompt,
+    variant_uses_mechanism_guard,
     variant_uses_reflection,
 )
 
@@ -165,8 +167,10 @@ def run_task(
     result = TaskResult(task_id=task["id"], variant=variant, trial=trial)
 
     db = MockDB()
+    # 机制约束（工具层）：同一回合只准一次写操作。守卫在整轮任务内共享，每回合重置。
+    guard = TurnGuard() if variant_uses_mechanism_guard(variant) else None
     try:
-        agent, _tools = build_agent(variant, task, db, llm)
+        agent, _tools = build_agent(variant, task, db, llm, guard=guard)
     except Exception as exc:  # noqa: BLE001
         result.error = "构造 agent 失败: %s" % exc
         return result
@@ -180,10 +184,14 @@ def run_task(
     for turn_index in range(max_turns):
         user_msg = user_turns[turn_index]
         history.append({"role": "user", "content": user_msg})
+        if guard is not None:
+            guard.begin_turn()
 
         if variant_uses_reflection(variant) and reflection:
             # 反思结论注入下一轮：重建 agent（system_message 变化），历史通过 messages 传入
-            agent, _tools = build_agent(variant, task, db, llm, reflection=reflection)
+            agent, _tools = build_agent(
+                variant, task, db, llm, reflection=reflection, guard=guard
+            )
             reflection = ""
 
         batches: List[List[Any]] = []
