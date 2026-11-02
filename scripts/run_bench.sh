@@ -41,7 +41,7 @@ if [ ${#VARIANTS[@]} -eq 0 ]; then
     VARIANTS=(A_baseline B_crop B_points B_context B_handwritten)
 fi
 
-# 密钥兜底
+# 密钥兜底：环境变量优先，其次从本机 Claude Code 配置读取
 if [ -z "${MINIMAX_API_KEY:-}" ] && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
     MINIMAX_API_KEY="$(py -3 -c "
 import json, os
@@ -53,8 +53,8 @@ except Exception:
 ")"
     export MINIMAX_API_KEY
 fi
-if [ -z "${MINIMAX_API_KEY:-}" ]; then
-    echo "[bench] 未找到 API 密钥，请设置 MINIMAX_API_KEY（见 .env.example）" >&2
+if [ -z "${MINIMAX_API_KEY:-}" ] && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+    echo "[bench] 未找到 API 密钥，请设置 MINIMAX_API_KEY（或 ANTHROPIC_AUTH_TOKEN），见 .env.example" >&2
     exit 1
 fi
 

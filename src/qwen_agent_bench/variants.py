@@ -34,6 +34,7 @@ VARIANTS = [
     "B_points",           # **只要点化**（全量规则要点化），不裁剪、不红线前置
     "B_crop_points",      # 裁剪 + 要点化，**不**红线前置（用于单独隔离「裁剪」的效应）
     "B_points_redline",   # 要点化 + 红线前置，**不**裁剪（用于单独隔离「红线前置」的效应）
+    "B_points_trunc",     # **等长对照**：全量要点化但截断到与裁剪版等长
     "B_context",          # 裁剪 + 要点化 + 红线前置（= 完整上下文工程）
     "B_handwritten",      # 同 B，但 policy 用**人工手写**的摘要 —— 与自动版对照
     "B_native",           # 同 B，走原生 function calling
@@ -158,6 +159,12 @@ def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
         return render(spec, scenes=scenes, points=True, redline_first=False)
     if variant == "B_points_redline":
         return render(spec, scenes=None, points=True, redline_first=True)
+    if variant == "B_points_trunc":
+        # **等长对照**：全量要点化版本，但按字符数截断到与裁剪版等长。
+        # 用来区分「裁剪掉的内容缺失」与「上下文变短本身」两种解释。
+        full = render(spec, scenes=None, points=True, redline_first=False)
+        cropped = render(spec, scenes=scenes, points=True, redline_first=False)
+        return full[: len(cropped)]
     if variant_uses_digest(variant):
         return render(spec, scenes=scenes, points=True, redline_first=True)
     return render(spec, scenes=None, points=False, redline_first=False)

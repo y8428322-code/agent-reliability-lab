@@ -20,6 +20,7 @@ ORDER = [
     "B_points",
     "B_crop_points",
     "B_points_redline",
+    "B_points_trunc",
     "B_context",
     "B_handwritten",
     "B_native",
