@@ -235,7 +235,12 @@ def run_task(
             except Exception:  # noqa: BLE001
                 parsed = None
             if isinstance(parsed, dict) and parsed.get("ok") is False:
-                result.tool_errors.append("%s: %s" % (name, parsed.get("error")))
+                message = "%s: %s" % (name, parsed.get("error"))
+                if "终止性拒绝" in str(parsed.get("error", "")):
+                    # 机制拒绝**不是**参数错误，单独统计，避免误归因
+                    result.guard_rejections.append(message)
+                else:
+                    result.tool_errors.append(message)
         result.turns.append(record)
 
         history.extend(_history_entries(calls, results, final_text))

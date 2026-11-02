@@ -97,8 +97,10 @@ class TurnGuard:
         self.turn_handled = []
 
         if len(mentioned) >= 2:
-            # 本轮用户提了多个业务 -> 这些业务都需要单独确认
-            for business in mentioned:
+            # 本轮用户提了多个业务 -> **只有用户后提的那些**需要单独确认；
+            # 用户先提的那个（第一个）本轮就应该办理。
+            # （v9 实测 bug：把全部都标成需确认，结果连本该办的第一个业务也被挡。）
+            for business in mentioned[1:]:
                 if business not in self.need_confirm:
                     self.need_confirm.append(business)
         elif len(mentioned) == 1:

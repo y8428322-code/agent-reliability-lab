@@ -623,12 +623,14 @@ class PolicyRenderTest(unittest.TestCase):
     def test_turn_guard_blocks_second_business_in_later_turn(self):
         """跨回合：需用户单独确认的业务，在用户没单独提到时仍被挡（v8 的缺口）。"""
         db, guard, tools, js = self._guard_tools()
-        guard.begin_turn("我家宽带断了，而且光猫也坏了，你直接给我换一台新的，顺便报修")
-        js.loads(
+        # 用户先提「报修」，后提「换机」-> 换机需单独确认，报修本轮就该办
+        guard.begin_turn("我家宽带断了完全没网，我要报修。另外光猫也坏了，你再给我换一台新的")
+        built = js.loads(
             tools["create_repair_ticket"].call(
                 js.dumps({"customer_id": "C1001", "fault_type": "断网"})
             )
         )
+        self.assertTrue(built["ok"])
         # 下一轮用户没说换机
         guard.begin_turn("好的麻烦快些")
         blocked = js.loads(
