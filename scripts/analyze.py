@@ -53,6 +53,8 @@ def main() -> None:
         data["model"] = data["model"] or part.get("model", "")
         data["results"].extend(part.get("results", []))
     results = data["results"]
+    aborted = [r for r in results if r.get("aborted")]
+    results = [r for r in results if not r.get("aborted")]
 
     variants = [v for v in ORDER if any(r["variant"] == v for r in results)]
     by_variant: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -65,7 +67,8 @@ def main() -> None:
             tasks.append(r["task_id"])
 
     print("=" * 110)
-    print("变体总览   模型=%s   运行数=%d   任务数=%d   结果文件=%d" % (data.get("model"), len(results), len(tasks), len(paths)))
+    print("变体总览   模型=%s   有效运行数=%d   任务数=%d   结果文件=%d   中断=%d"
+          % (data.get("model"), len(results), len(tasks), len(paths), len(aborted)))
     print("=" * 110)
     header = "%-20s %-8s %-9s %-8s %-8s %-10s %-9s %s" % (
         "变体", "运行数", "pass@1", "pass^3", "DB", "NL", "工具调用", "判定异常")
@@ -172,6 +175,11 @@ def main() -> None:
         ("B_crop", "B_context"),
         ("B_points", "B_context"),
         ("B_context", "B_handwritten"),
+        # 裁剪策略三档（P0「安全裁剪」实验）
+        ("B_points", "B_crop_safe"),
+        ("B_crop_points", "B_crop_keepredline"),
+        ("B_crop_keepredline", "B_crop_safe"),
+        ("B_crop_points", "B_crop_safe"),
     ]
     print("%-34s %-10s %-10s %s" % ("对比", "左赢", "右赢", "净"))
     for left, right in pairs:

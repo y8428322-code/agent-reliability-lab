@@ -192,6 +192,9 @@ def run_task(
                 batches.append(batch)
         except Exception as exc:  # noqa: BLE001
             result.error = "第 %d 轮执行异常: %s" % (turn_index + 1, exc)
+            # **中断的运行不是"任务失败"** —— 那是基础设施故障（限流/超时），
+            # 计入正确率会系统性压低分数。必须单独统计并排除。
+            result.aborted = True
             break
 
         result.n_llm_calls += 1
@@ -258,6 +261,7 @@ def run_task(
         d_reward, g_hash, p_hash = db_reward(task, db)
     except Exception as exc:  # noqa: BLE001
         result.error = "DB 判分失败: %s" % exc
+        result.aborted = True
         return result
     result.db_reward = d_reward
     result.gold_hash = g_hash

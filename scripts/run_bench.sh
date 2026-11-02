@@ -8,7 +8,8 @@
 #   bash scripts/run_bench.sh --jobs 2                     # 限制并发数
 #
 # 并行的理由：单变体一轮 17 任务 × 3 次约 25 分钟，串行 5 个变体要 2 小时以上；
-# 端点侧并发没问题，分变体并行能把整轮压到 1/3 左右。
+# 注意：并发太高会触发端点限流（实测 4 并发时 23/204 次运行被限流中断），
+# 而中断若被当成"任务失败"会系统性压低分数。默认 2 并发。
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,7 +25,7 @@ fi
 VARIANTS=()
 TRIALS=3
 TASKS=()
-JOBS=3
+JOBS=2
 OUT=""
 while [ $# -gt 0 ]; do
     case "$1" in

@@ -49,6 +49,7 @@ class TaskResult:
     runaway_turns: List[int] = field(default_factory=list)
     format_error: bool = False
     broken_calls: List[str] = field(default_factory=list)
+    aborted: bool = False
     failure_mode: str = ""
     reflection: str = ""
     n_llm_calls: int = 0

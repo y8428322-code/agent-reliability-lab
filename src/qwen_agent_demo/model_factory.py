@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict, List, Optional
 
 from qwen_agent.llm import get_chat_model
@@ -41,28 +42,70 @@ def normalize_args(raw: Any) -> str:
 
 
 class CompatOAI(TextChatAtOAI):
-    """修一个上游与严格 OpenAI 兼容服务的协议不兼容点。
+    """修两个上游与严格 OpenAI 兼容服务的问题。
 
-    上游 `BaseChatModel._conv_qwen_agent_messages_to_oai` 把工具结果消息转换成
-    `{'role': 'tool', 'id': <function_id>}`，但 OpenAI 规范里工具消息关联
-    tool_call 用的是 **`tool_call_id`** 字段。
+    ① **协议缺陷**：上游 `_conv_qwen_agent_messages_to_oai` 把工具结果消息转换成
+       `{'role': 'tool', 'id': <function_id>}`，但 OpenAI 规范里工具消息关联
+       tool_call 用的是 **`tool_call_id`** 字段。
 
-    MiniMax 的 `/v1/chat/completions` 会严格校验：只给 `id` 时直接返回
-    `400 invalid params, tool result's tool id() not found (2013)`；
-    补上 `tool_call_id` 后即通过（两个字段都给也可以）。
+       MiniMax 的 `/v1/chat/completions` 会严格校验：只给 `id` 时直接返回
+       `400 invalid params, tool result's tool id() not found (2013)`；
+       补上 `tool_call_id` 后即通过（两个字段都给也可以）。
 
-    这个错误只在**原生 function calling**（`use_raw_api`）下暴露——文本式
-    function calling 会把工具结果渲染成正文，不会产生 role=tool 消息。
+       这个错误只在**原生 function calling**（`use_raw_api`）下暴露——文本式
+       function calling 会把工具结果渲染成正文，不会产生 role=tool 消息。
 
-    不改上游源码，只在本封装层覆写转换结果。
+    ② **重试不足**：上游用 `openai.OpenAI(**api_kwargs)` 建客户端，SDK 默认
+       `max_retries=2`。批量跑评测时并发一高就触发限流，
+       报错 `Maximum number of retries (2) exceeded`，
+       **运行中断会被当成"任务失败"计进正确率**——这会系统性压低分数。
+       这里给所有调用套上指数退避重试。
+
+    不改上游源码，只在本封装层覆写。
     """
 
+    def __init__(self, cfg: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(cfg)
+        self._chat_complete_create = _with_retry(self._chat_complete_create)
+        self._complete_create = _with_retry(self._complete_create)
+
     def convert_messages_to_dicts(self, messages: List[Any]) -> List[Dict[str, Any]]:
+        """补上 OpenAI 规范要求的 tool_call_id（上游只写了 id）。"""
         converted = super().convert_messages_to_dicts(messages)
         for msg in converted:
             if msg.get("role") == "tool" and not msg.get("tool_call_id") and msg.get("id"):
                 msg["tool_call_id"] = msg["id"]
         return converted
+
+
+def _is_transient(exc: Exception) -> bool:
+    """是否是值得重试的瞬时错误（限流 / 超时 / 连接抖动 / 5xx）。"""
+    try:
+        import openai
+    except Exception:  # noqa: BLE001
+        return False
+    if isinstance(exc, (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError)):
+        return True
+    status = getattr(exc, "status_code", None)
+    return isinstance(status, int) and status >= 500
+
+
+def _with_retry(fn, retries: int = 6, base_delay: float = 2.0):
+    """给同步 API 调用套上指数退避重试。"""
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        last: Optional[Exception] = None
+        for attempt in range(retries):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if not _is_transient(exc) or attempt == retries - 1:
+                    raise
+                time.sleep(base_delay * (attempt + 1))
+        raise last  # type: ignore[misc]
+
+    return wrapper
 
 
 def build_llm(cfg: ModelConfig, use_raw_api: bool = False) -> BaseChatModel:

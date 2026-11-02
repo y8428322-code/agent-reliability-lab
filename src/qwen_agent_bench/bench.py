@@ -158,6 +158,13 @@ def main() -> None:
                     use_nl_judge=not args.no_nl,
                 )
                 results.append(res)
+                if res.aborted:
+                    # 中断 = 基础设施故障，不是模型答错；单独计数，不进正确率
+                    print(
+                        "[ABRT] %s %s trial=%d  <%s>"
+                        % (variant, task["id"], trial, res.error)
+                    )
+                    continue
                 flag = "OK " if res.success else "FAIL"
                 print(
                     "[%s] %s %s trial=%d db=%.0f nl=%.2f tool=%d err=%d%s"
@@ -197,6 +204,7 @@ def main() -> None:
                 "n_tool_calls": r.n_tool_calls,
                 "tool_errors": r.tool_errors,
                 "audit": r.audit,
+                "aborted": r.aborted,
                 "runaway": r.runaway,
                 "runaway_turns": r.runaway_turns,
                 "nl_details": r.nl_details,
