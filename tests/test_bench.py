@@ -492,6 +492,28 @@ class PolicyRenderTest(unittest.TestCase):
         hand = policy_for_variant("B_handwritten", task)
         self.assertNotEqual(auto, hand)
 
+    def test_three_context_mechanisms_are_orthogonal(self):
+        """上下文工程的三个子机制必须能独立开关，否则无法归因。"""
+        from qwen_agent_bench.variants import policy_for_variant
+
+        task = {"policy_sections": ["redline", "identity", "repair", "speech"]}
+        a = policy_for_variant("A_baseline", task)
+        crop = policy_for_variant("B_crop", task)
+        points = policy_for_variant("B_points", task)
+        full = policy_for_variant("B_context", task)
+
+        # 裁剪：只保留相关分节 → 比全量短
+        self.assertLess(len(crop), len(a))
+        self.assertNotIn("工单撤销", crop)
+        # 要点化：出现要点符号，且比长叙述短
+        self.assertIn("- ", points)
+        self.assertLess(len(points), len(a))
+        # 红线前置：红线块在最前
+        self.assertTrue(full.startswith("## 0. 红线"))
+        self.assertFalse(a.startswith("## 0. 红线"))
+        # 四者互不相同
+        self.assertEqual(len({a, crop, points, full}), 4)
+
 
 class AttributionTest(unittest.TestCase):
     """动作级失败归因：把「状态不符」变成可定位的原因。"""

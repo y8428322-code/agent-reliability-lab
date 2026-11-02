@@ -145,6 +145,40 @@ def main() -> None:
     print("任务区分度：%d/%d 个任务能区分变体（各变体在该任务上的通过率不全相同）" % (len(discriminating), len(tasks)))
     print("  -> %s" % (", ".join(discriminating) or "无"))
 
+    # 配对差异：同一任务上逐对比较，比总体 pass^3 灵敏得多
+    # （总体粒度受限于任务数 1/17 ≈ 0.059，配对粒度是 1 个任务）
+    print()
+    print("配对差异（同一任务上谁赢谁输；> 表示左边更好）")
+    print("-" * 110)
+    pairs = [
+        ("A_baseline", "B_crop"),
+        ("A_baseline", "B_points"),
+        ("A_baseline", "B_context"),
+        ("B_crop", "B_context"),
+        ("B_points", "B_context"),
+        ("B_context", "B_handwritten"),
+    ]
+    print("%-34s %-10s %-10s %s" % ("对比", "左赢", "右赢", "净"))
+    for left, right in pairs:
+        if left not in by_variant or right not in by_variant:
+            continue
+        left_only = right_only = 0
+        for t in tasks:
+            li = [r for r in by_variant[left] if r["task_id"] == t]
+            ri = [r for r in by_variant[right] if r["task_id"] == t]
+            if not li or not ri:
+                continue
+            l_rate = sum(1 for r in li if r["success"]) / len(li)
+            r_rate = sum(1 for r in ri if r["success"]) / len(ri)
+            if l_rate > r_rate:
+                left_only += 1
+            elif r_rate > l_rate:
+                right_only += 1
+        print(
+            "%-34s %-10d %-10d %+d"
+            % ("%s vs %s" % (left, right), left_only, right_only, left_only - right_only)
+        )
+
 
 if __name__ == "__main__":
     main()
