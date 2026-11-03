@@ -580,6 +580,45 @@ class PolicyRenderTest(unittest.TestCase):
         tools = {t.name: t for t in build_tools(db, guard=guard)}
         return db, guard, tools, _json
 
+    def test_rule_set_is_isolated_between_variant_pairs(self):
+        """规则集（legacy / current）必须与守卫机制**相互独立**。
+
+        这是「规则集改动」能被单独归因的前提：
+          B_crop_keepredline vs B_crop_redline   -> 只差规则集（都无守卫）
+          B_guard            vs B_guard_redline  -> 只差规则集（都有守卫）
+        """
+        from qwen_agent_bench.variants import (
+            VARIANTS,
+            VARIANT_RULESET,
+            policy_for_variant,
+        )
+
+        # 用一个不含 multi 场景的任务，验证「跨场景规则是否还在上下文里」
+        task = {"policy_sections": ["redline", "identity", "device", "speech"]}
+        new_r15 = "以用户明确诉求为依据"
+        new_r18 = "不得声称未完成的操作已完成"
+
+        legacy = [v for v in VARIANTS if v not in VARIANT_RULESET]
+        current = [v for v, f in VARIANT_RULESET.items() if f == "policy_rules.yaml"]
+        self.assertTrue(legacy)
+        self.assertTrue(current)
+
+        for v in legacy:
+            p = policy_for_variant(v, task)
+            self.assertNotIn(new_r15, p, "%s 应使用 legacy 规则集" % v)
+            self.assertNotIn(new_r18, p, "%s 应使用 legacy 规则集" % v)
+        # v1 与 v2 的措辞不同，但都含 R15/R18
+        for v, f in VARIANT_RULESET.items():
+            if f != "policy_rules_v1.yaml":
+                continue
+            p = policy_for_variant(v, task)
+            self.assertIn(new_r15, p, "%s 应使用 v1 规则集" % v)
+            self.assertIn(new_r18, p, "%s 应使用 v1 规则集" % v)
+        for v in current:
+            p = policy_for_variant(v, task)
+            self.assertIn(new_r15, p, "%s 应使用 current 规则集" % v)
+            self.assertIn(new_r18, p, "%s 应使用 current 规则集" % v)
+
     def test_turn_guard_blocks_second_business_in_a_multi_business_turn(self):
         """用户同一轮提了多个业务 -> 本轮只准办**用户先提的那个**。"""
         db, guard, tools, js = self._guard_tools()

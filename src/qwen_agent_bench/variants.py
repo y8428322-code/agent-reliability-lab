@@ -25,6 +25,7 @@ from .compat import CompatAssistant
 from .domain.db import MockDB
 from .domain.loader import load_policy_digest
 from .domain.render import load_policy_rules, load_policy_rules_legacy, render
+from .domain.db import domain_dir
 from .domain.tools import (
     TurnGuard,
     apply_enhanced_descriptions,
@@ -41,8 +42,10 @@ VARIANTS = [
     "B_crop_keepredline", # 中间裁剪：红线不裁、通用约束裁
     "B_crop_safe",        # 新裁剪：按规则强度分层，红线与通用约束都不裁
     "B_guard",            # 同 B_crop_keepredline + **机制约束**（工具层：一回合只准一次写操作）
-    "B_crop_redline",     # 同 B_crop_keepredline，但规则集换成「通用约束提为红线 + 补缺口」的版本
-    "B_guard_redline",    # 同 B_guard，但规则集同上
+    "B_crop_redline",     # 同 B_crop_keepredline，规则集换成 v1（通用约束提为红线 + 补缺口）
+    "B_guard_redline",    # 同 B_guard，规则集同上
+    "B_crop_v2",          # 同 B_crop_keepredline，规则集换成 v2（修正 v1 措辞）
+    "B_guard_v2",         # 同 B_guard，规则集同上
     "B_points_redline",   # 要点化 + 红线前置，**不**裁剪（用于单独隔离「红线前置」的效应）
     "B_points_trunc",     # **等长对照**：全量要点化但截断到与裁剪版等长
     "B_context",          # 裁剪 + 要点化 + 红线前置（= 完整上下文工程）
@@ -53,8 +56,16 @@ VARIANTS = [
     "E_guarded_reflect",  # 同 D + 双向自省反思
 ]
 
-# 使用「当前规则集」的变体（其余沿用 legacy，以便与历史批次可比）
-CURRENT_RULESET_VARIANTS = ("B_crop_redline", "B_guard_redline")
+# 变体 -> 规则集文件。未列出的变体一律用 legacy，以便与历史批次可比。
+#   legacy            「跨场景通用约束提为红线」之前的历史版本
+#   policy_rules_v1   第一版改动：R15 提为红线 + R5/R11 补动作项 + 新增 R18
+#   policy_rules      当前版：修正 v1 的措辞（见 docs/实验报告-v10.md）
+VARIANT_RULESET = {
+    "B_crop_redline": "policy_rules_v1.yaml",
+    "B_guard_redline": "policy_rules_v1.yaml",
+    "B_crop_v2": "policy_rules.yaml",
+    "B_guard_v2": "policy_rules.yaml",
+}
 
 # 会写库的写操作工具（减法机制只对它们加约束）
 WRITE_TOOL_NAMES = (
@@ -166,7 +177,10 @@ def policy_for_variant(variant: str, task: Dict[str, Any]) -> str:
     #   legacy  = 「通用约束提为红线」之前的历史版本 —— 除下面两个变体外一律用它，
     #             以便与 v4/v5/v6 的历史批次直接可比；
     #   current = 当前版本（R15 提为红线、R5/R11 补动作项、新增 R18）。
-    spec = load_policy_rules() if variant in CURRENT_RULESET_VARIANTS else load_policy_rules_legacy()
+    # 规则集是一个独立的变量：变体各自绑定一个规则集版本，
+    # 于是「规则集改动」可以被单独归因（与守卫机制互不干扰）。
+    ruleset_file = VARIANT_RULESET.get(variant)
+    spec = load_policy_rules(domain_dir() / ruleset_file) if ruleset_file else load_policy_rules_legacy()
     scenes = [s for s in (task.get("policy_sections") or []) if s != "redline"]
     if variant == "B_crop":
         return render(spec, scenes=scenes, points=False, redline_first=False)
