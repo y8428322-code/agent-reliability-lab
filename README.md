@@ -113,15 +113,38 @@ bash scripts/run_bench.sh --variant B_crop_keepredline --variant B_guard --trial
 
 ## 5. 定位并修复的上游缺陷（`src/qwen_agent_demo/model_factory.py`）
 
-| # | 缺陷 | 影响 |
-|---|---|---|
-| 1 | 原生 function calling 的工具结果用 `id` 而非 OpenAI 规范的 **`tool_call_id`** | MiniMax 严格校验 → 直接 `400 tool result's tool id not found` |
-| 2 | `setup.py` 漏声明 `numpy`/`soundfile`/`ipykernel`/`regex`/`tqdm` | `import qwen_agent` 直接失败 |
-| 3 | `reasoning_content` 存在时 `_chat_no_stream` 丢弃 `tool_calls` | 工具调用被静默吞掉 |
-| 4 | `yield response + output` 反复吐出累积消息 | 工具调用计数虚高 |
-| 5 | `extra.function_id` 跨轮重号 | tool_call 与 tool 消息 id 错位 |
+| # | 缺陷 | 影响 | 上游状态 |
+|---|---|---|---|
+| 1 | 原生 function calling 的工具结果用 `id` 而非 OpenAI 规范的 **`tool_call_id`** | MiniMax 严格校验 → 直接 `400 tool result's tool id not found` | 已有 PR #917 |
+| 2 | `setup.py` 漏声明 `numpy`/`soundfile`/`ipykernel`/`regex`/`tqdm` | `import qwen_agent` 直接失败 | 已有 PR #968 |
+| 3 | **非流式**回复同时含 `reasoning_content` 与 `tool_calls` 时，**tool_calls 被丢弃** | agent 永远不调工具（流式正常） | **本仓库已提修复** |
+| 4 | `yield response + output` 反复吐出累积消息 | 工具调用计数虚高 | 上游内部设计 |
+| 5 | 并行 tool_call 缺 `extra.function_id` 时 **id 重复** | 端点 `400 duplicate tool_call id: 1` | **本仓库已开 issue** |
 
-均在本仓库的封装层修复，**不改动上游源码**。
+#1~#5 在本仓库的封装层都已规避，**不改动上游源码**。
+
+### 5.1 对上游 Qwen-Agent 的贡献
+
+在把 Qwen-Agent 接到 MiniMax（OpenAI 兼容端点）时定位到上述缺陷。其中两项上游尚未覆盖，
+已提交修复与讨论：
+
+| 提交 | 内容 | 材料 |
+|---|---|---|
+| **PR** | 修复非流式路径丢弃 `tool_calls`（影响所有返回 `reasoning_content` 的模型） | [`docs/上游贡献/PR-修复non-streaming丢tool_calls.md`](docs/上游贡献/PR-修复non-streaming丢tool_calls.md) |
+| **Issue** | 并行 tool_call id 重复导致端点 400（含三种修法与配对约束分析） | [`docs/上游贡献/ISSUE-并行tool_call_id重复.md`](docs/上游贡献/ISSUE-并行tool_call_id重复.md) |
+
+复现证据来自**真实端点**，不是推测：
+
+```
+Q: 请用工具计算 (137*89 - 42) / 7 的结果      （MiniMax-M3.1-Flash，非流式）
+   reasoning_content=有(297字) | tool_calls=['calc'] | finish=tool_calls
+→ 上游只返回 content + reasoning_content，tool_calls 丢失
+```
+
+补丁附 3 个回归测试，且已验证：**可干净应用到干净上游**、补丁前失败补丁后通过、
+上游测试套件**无新增失败**（基线 50 failed 全部源于缺 `DASHSCOPE_API_KEY`）。
+
+完整调研结论（哪些已被上游覆盖、哪些没有）见 [`docs/上游贡献/README.md`](docs/上游贡献/README.md)。
 
 ## 6. 局限（请一并读）
 

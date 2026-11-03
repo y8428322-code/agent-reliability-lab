@@ -33,10 +33,15 @@ say() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 # ------------------------------------------------------------ 上传本项目
 if [ "$MODE" = "all" ] || [ "$MODE" = "project" ]; then
     say "[1/3] 推本项目到 github.com/$GH_USER/$PROJECT_REPO"
-    if ! ssh -o BatchMode=yes -T git@github.com >/dev/null 2>&1; then
-        echo "  ✗ SSH 未就绪。请先把 ~/.ssh/id_rsa.pub 加到 GitHub 的 SSH keys。"
+    # 注意：GitHub 认证成功时 `ssh -T` 的**退出码仍是 1**（它不提供 shell），
+    # 所以必须看输出内容，不能只看退出码。
+    SSH_OUT="$(ssh -o BatchMode=yes -T git@github.com 2>&1 || true)"
+    if ! printf '%s' "$SSH_OUT" | grep -q "successfully authenticated"; then
+        echo "  ✗ SSH 未就绪：$SSH_OUT"
+        echo "    请先把 ~/.ssh/id_rsa.pub 加到 GitHub → Settings → SSH and GPG keys。"
         exit 1
     fi
+    printf '  ✓ %s\n' "$(printf '%s' "$SSH_OUT" | head -1)"
     if git remote get-url origin >/dev/null 2>&1; then
         git remote set-url origin "git@github.com:$GH_USER/$PROJECT_REPO.git"
     else
