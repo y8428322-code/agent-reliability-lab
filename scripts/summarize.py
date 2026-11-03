@@ -41,7 +41,7 @@ GROUPS: List[Dict[str, Any]] = [
     {
         "key": "keepredline",
         "label": "B_crop_keepredline（裁剪 + 保红线，无机制约束）",
-        "desc": "5 个独立批次；规则集自 e7c1d24 之后未再变，守卫对该变体无影响，故可合并",
+        "desc": "5 个独立批次；legacy 规则集，守卫对该变体无影响，故可合并",
         "files": [
             "bench_B_crop_keepredline_20261102_150010.json",
             "bench_B_crop_keepredline_20261102_163638.json",
@@ -53,11 +53,27 @@ GROUPS: List[Dict[str, Any]] = [
     {
         "key": "guard",
         "label": "B_guard（同策略 + 工具层机制约束）",
-        "desc": "3 个独立批次；**仅取守卫最终修复版（bb1e081 之后）**，早期批次守卫逻辑不同，不可合并",
+        "desc": "3 个独立批次；legacy 规则集；**仅取守卫最终修复版（bb1e081 之后）**，早期批次守卫逻辑不同，不可合并",
         "files": [
             "bench_B_guard_20261102_190206.json",
             "bench_B_guard_20261102_193810.json",
             "bench_B_guard_20261102_201127.json",
+        ],
+    },
+    {
+        "key": "crop_redline",
+        "label": "B_crop_redline（裁剪 + 保红线，新规则集，无机制约束）",
+        "desc": "current 规则集（跨场景通用约束提为红线 + 补规则缺口），无机制约束；与 keepredline 只差规则集",
+        "files": [
+            "bench_B_crop_redline_20261103_102226.json",
+        ],
+    },
+    {
+        "key": "guard_redline",
+        "label": "B_guard_redline（同上 + 工具层机制约束）",
+        "desc": "current 规则集 + 机制约束；与 B_guard 只差规则集",
+        "files": [
+            "bench_B_guard_redline_20261103_102226.json",
         ],
     },
 ]
@@ -434,7 +450,7 @@ def main() -> None:
     labels = [g["label"].split("（")[0] for g in GROUPS]
     svg_grouped_bars(
         out_dir / "fig1_main.svg",
-        "上下文工程 + 工具层机制约束：主结果",
+        "上下文工程 + 机制约束 + 规则强度分层：主结果",
         labels,
         [
             ("pass@1", [summaries[g["key"]]["pass_at_1"] for g in GROUPS], "#2f6df6"),
@@ -457,7 +473,8 @@ def main() -> None:
     scatter_series = []
     for idx, group in enumerate(GROUPS):
         pts = [(i + 1, v[1]) for i, v in enumerate(batches[group["key"]])]
-        scatter_series.append((group["label"].split("（")[0], pts, ["#2f6df6", "#e8802f"][idx]))
+        palette = ["#2f6df6", "#e8802f", "#2e9e5b", "#a05ad6"]
+        scatter_series.append((group["label"].split("（")[0], pts, palette[idx % len(palette)]))
     svg_scatter(
         out_dir / "fig2_variance.svg",
         "批次间方差：pass^3 每个批次的取值",

@@ -18,10 +18,19 @@ from .db import domain_dir
 
 
 def load_policy_rules(path: Optional[Path] = None) -> Dict[str, Any]:
-    """读取规则单一事实源。"""
+    """读取规则单一事实源。
+
+    ``policy_rules.yaml`` 是当前版本；``policy_rules_legacy.yaml`` 是「跨场景通用约束
+    提为红线」之前的历史版本，用于做单变量对照（两者只差 R5/R11/R15/R18）。
+    """
     p = Path(path) if path else domain_dir() / "policy_rules.yaml"
     with p.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def load_policy_rules_legacy() -> Dict[str, Any]:
+    """历史版本规则集（对照用）。"""
+    return load_policy_rules(domain_dir() / "policy_rules_legacy.yaml")
 
 
 def _rules_by_category(spec: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
