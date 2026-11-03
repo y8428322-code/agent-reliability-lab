@@ -50,6 +50,8 @@ class TaskResult:
     runaway_turns: List[int] = field(default_factory=list)
     format_error: bool = False
     broken_calls: List[str] = field(default_factory=list)
+    deferred_no_action: bool = False
+    deferred_turns: List[int] = field(default_factory=list)
     aborted: bool = False
     failure_mode: str = ""
     reflection: str = ""
@@ -184,6 +186,20 @@ def judge_all(cfg, task: Dict[str, Any], transcript: str) -> Tuple[float, List[D
         if ok:
             passed += 1
     return passed / float(len(assertions)), details
+
+
+# 「预告式拖延」：回复里承诺要查/要办，但本回合一次工具都没调。
+# 这是 v1 规则集实验里暴露的新失败模式（agent 每轮都说「我这就为您查询」却从不真的调），
+# 判分器能靠 NL 断言抓到它，但需要一个直接的量化指标。
+# 与 format_error 同类：独立于成败的质量指标。
+_DEFER_RE = re.compile(r"我先|我这就|这就|马上|稍等|稍后|待会|先帮您|为您查询|先查|先定位")
+
+
+def has_deferred_action(text: str) -> bool:
+    """文本里是否出现了「我先/这就…(查|办)」这类承诺后续动作的说法。"""
+    if not text:
+        return False
+    return bool(_DEFER_RE.search(text))
 
 
 # --------------------------------------------------------------------------

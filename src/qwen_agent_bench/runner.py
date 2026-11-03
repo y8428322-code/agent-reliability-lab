@@ -15,6 +15,7 @@ from .evaluator import (
     TurnRecord,
     attribute_failure,
     db_reward,
+    has_deferred_action,
     judge_all,
     unexecuted_broken_calls_for_turn,
 )
@@ -215,6 +216,12 @@ def run_task(
             result.runaway_turns.append(turn_index + 1)
 
         record = TurnRecord(user=user_msg, assistant_text=final_text)
+
+        # 「预告式拖延」：说了要查/要办，但本回合一次工具都没调
+        if not calls and has_deferred_action(final_text):
+            result.deferred_no_action = True
+            result.deferred_turns.append(turn_index + 1)
+
         for call in calls:
             record.tool_calls.append((call["name"], call["arguments"]))
             result.n_tool_calls += 1
