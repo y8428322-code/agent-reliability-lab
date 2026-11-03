@@ -1,0 +1,167 @@
+From 0bb09fe2b44f14c1763d2a72a015dc8ed797d44d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9D=8E=E6=96=87=E5=BA=B7?=
+ <16393472+dmulwk@user.noreply.gitee.com>
+Date: Tue, 3 Nov 2026 09:06:28 +0800
+Subject: [PATCH] fix(llm): keep tool_calls when a non-streaming reply also
+ carries reasoning_content
+
+In TextChatAtOAI._chat_no_stream the reply was dispatched on whether the
+message has a reasoning_content attribute:
+
+    if hasattr(response.choices[0].message, 'reasoning_content'):
+        return [Message(role=ASSISTANT, content=..., reasoning_content=...)]
+    else:
+        return [Message(role=ASSISTANT, content=...)]
+
+A reply that carries BOTH reasoning_content and tool_calls therefore lost
+its tool calls, and the agent never performed the requested action. This
+hits every endpoint that returns reasoning_content (MiniMax, DeepSeek-R1,
+Qwen3-thinking, ...) as soon as use_raw_api/stream=False is used.
+
+This patch keeps both: one message per tool call, mirroring the streaming
+path (_chat_stream), with reasoning_content attached and extra.function_id
+set to the provider's tool call id so that the ids stay unique.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+---
+ qwen_agent/llm/oai.py                    | 24 +++++--
+ tests/llm/test_tool_call_preservation.py | 89 ++++++++++++++++++++++++
+ 2 files changed, 108 insertions(+), 5 deletions(-)
+ create mode 100644 tests/llm/test_tool_call_preservation.py
+
+diff --git a/qwen_agent/llm/oai.py b/qwen_agent/llm/oai.py
+index 2498ef5..ec0da6f 100644
+--- a/qwen_agent/llm/oai.py
++++ b/qwen_agent/llm/oai.py
+@@ -166,14 +166,28 @@ class TextChatAtOAI(BaseFnCallModel):
+         messages = self.convert_messages_to_dicts(messages)
+         try:
+             response = self._chat_complete_create(model=self.model, messages=messages, stream=False, **generate_cfg)
+-            if hasattr(response.choices[0].message, 'reasoning_content'):
++            message = response.choices[0].message
++            reasoning_content = getattr(message, 'reasoning_content', None)
++            tool_calls = getattr(message, 'tool_calls', None) or []
++
++            if tool_calls:
++                # One message per tool call, mirroring the streaming path (_chat_stream):
++                # a reply may carry BOTH reasoning_content and tool_calls, and dropping
++                # the tool calls leaves the agent unable to act on the request.
+                 return [
+                     Message(role=ASSISTANT,
+-                            content=response.choices[0].message.content,
+-                            reasoning_content=response.choices[0].message.reasoning_content)
++                            content='',
++                            reasoning_content=reasoning_content,
++                            function_call=FunctionCall(name=tc.function.name, arguments=tc.function.arguments),
++                            extra={'function_id': tc.id})
++                    for tc in tool_calls
+                 ]
+-            else:
+-                return [Message(role=ASSISTANT, content=response.choices[0].message.content)]
++
++            return [
++                Message(role=ASSISTANT,
++                        content=message.content,
++                        reasoning_content=reasoning_content)
++            ]
+         except OpenAIError as ex:
+             raise ModelServiceError(exception=ex)
+ 
+diff --git a/tests/llm/test_tool_call_preservation.py b/tests/llm/test_tool_call_preservation.py
+new file mode 100644
+index 0000000..fb119da
+--- /dev/null
++++ b/tests/llm/test_tool_call_preservation.py
+@@ -0,0 +1,89 @@
++# Copyright 2023 The Qwen team, Alibaba Group. All rights reserved.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#    http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Regression tests for tool-call preservation in the OpenAI-compatible path.
++
++Both cases below are reachable from ordinary agent usage and are rejected by
++strict OpenAI-compatible endpoints:
++
++* parallel tool calls that share one id -> ``400 invalid params, duplicate
++  tool_call id: 1 (2013)``
++* a non-streaming reply that carries both ``reasoning_content`` and
++  ``tool_calls`` -> the tool calls are silently dropped, so the agent never
++  performs the requested action.
++"""
++
++from types import SimpleNamespace
++from unittest import mock
++
++from qwen_agent.llm.base import BaseChatModel
++from qwen_agent.llm.oai import TextChatAtOAI
++from qwen_agent.llm.schema import Message
++
++
++def _tool_call(call_id, name, arguments):
++    return SimpleNamespace(id=call_id, type='function',
++                           function=SimpleNamespace(name=name, arguments=arguments))
++
++
++def test_parallel_tool_calls_get_unique_ids():
++    """Two tool calls in one assistant message must not share an id."""
++    messages = [
++        Message(role='user', content='hi'),
++        Message(role='assistant', content='', function_call={'name': 'f', 'arguments': '{}'}),
++        Message(role='assistant', content='', function_call={'name': 'g', 'arguments': '{}'}),
++    ]
++
++    converted = BaseChatModel._conv_qwen_agent_messages_to_oai(messages)
++
++    tool_calls = converted[1]['tool_calls']
++    assert len(tool_calls) == 2
++    ids = [tc['id'] for tc in tool_calls]
++    assert len(set(ids)) == 2, f'tool_call ids must be unique, got {ids}'
++
++
++def test_explicit_function_ids_are_preserved():
++    """An explicit ``extra.function_id`` must still be used as the tool_call id."""
++    messages = [
++        Message(role='user', content='hi'),
++        Message(role='assistant',
++                content='',
++                function_call={'name': 'f', 'arguments': '{}'},
++                extra={'function_id': 'call_abc'}),
++    ]
++
++    converted = BaseChatModel._conv_qwen_agent_messages_to_oai(messages)
++
++    assert converted[1]['tool_calls'][0]['id'] == 'call_abc'
++
++
++def test_no_stream_keeps_tool_calls_when_reasoning_content_present():
++    """A reply with both ``reasoning_content`` and ``tool_calls`` must keep both."""
++    llm = TextChatAtOAI({'model': 'some-model', 'model_type': 'oai', 'api_key': 'k'})
++
++    fake_message = SimpleNamespace(
++        content='',
++        reasoning_content='let me think...',
++        tool_calls=[_tool_call('call_1', 'f', '{"a": 1}')],
++    )
++    fake_response = SimpleNamespace(choices=[SimpleNamespace(message=fake_message)])
++
++    # `_chat_complete_create` 是实例属性（在 __init__ 里赋值），因此在实例上替换
++    llm._chat_complete_create = mock.Mock(return_value=fake_response)
++
++    out = llm._chat_no_stream([Message(role='user', content='hi')], {})
++
++    assert any(getattr(m, 'function_call', None) is not None for m in out), (
++        'tool_calls were dropped by the reasoning_content branch')
++    assert any(getattr(m, 'reasoning_content', None) for m in out)
+-- 
+2.50.1.windows.1
+
