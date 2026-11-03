@@ -1,7 +1,6 @@
-From 0bb09fe2b44f14c1763d2a72a015dc8ed797d44d Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?=E6=9D=8E=E6=96=87=E5=BA=B7?=
- <16393472+dmulwk@user.noreply.gitee.com>
-Date: Tue, 3 Nov 2026 09:06:28 +0800
+From 3c659cd9d26238680cf7b0c105a44b25811cd143 Mon Sep 17 00:00:00 2001
+From: y8428322-code <296799056+y8428322-code@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 09:10:02 +0800
 Subject: [PATCH] fix(llm): keep tool_calls when a non-streaming reply also
  carries reasoning_content
 
@@ -16,7 +15,7 @@ message has a reasoning_content attribute:
 A reply that carries BOTH reasoning_content and tool_calls therefore lost
 its tool calls, and the agent never performed the requested action. This
 hits every endpoint that returns reasoning_content (MiniMax, DeepSeek-R1,
-Qwen3-thinking, ...) as soon as use_raw_api/stream=False is used.
+Qwen3-thinking, ...) as soon as the non-streaming path is used.
 
 This patch keeps both: one message per tool call, mirroring the streaming
 path (_chat_stream), with reasoning_content attached and extra.function_id
