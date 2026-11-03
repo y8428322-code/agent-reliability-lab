@@ -1,221 +1,155 @@
-# Qwen-Agent 复现演示（接入 MiniMax）
+# Agent 可靠性评测床 · 在 Qwen-Agent 上做上下文工程与机制约束的实证
 
-基于 GitHub 高星开源框架 **Qwen-Agent**（17,236★ / Apache-2.0 / 阿里）的本地复现工程：
-拉取上游源码 → 建立环境 → 用 MiniMax 的 **OpenAI 兼容端点**跑通 **Function Calling / ReAct Chat / 多 Agent 编排** 三个场景。
+> 一个自建的 agent 评测床 + 一套「上下文工程到底该怎么调」的可复算实验。
+> 上游框架是 [Qwen-Agent](https://github.com/QwenLM/Qwen-agent)（17.2k★ / Apache-2.0），**未魔改**；
+> 我的贡献在**协议适配层**与**评测/约束层**。
 
-> 上游源码保持 pristine（未做任何魔改）。魔改方案待本工程跑通后再定。
-> 评测 / 调优 / 安全管控部分**只出方法论文档**，不实现代码，见 `docs/`。
+**三个数字**（8 个独立批次 / 408 次运行 / 0 中断，模型 MiniMax-M3.1-Flash）：
 
----
-
-## 环境
-
-| 项 | 值 |
+| | 数值 |
 |---|---|
-| Python | 3.12（`py -3.12`）。**本机 `python` / `pip` 是应用商店占位程序，不可用** |
-| 虚拟环境 | `./.venv`（由 `scripts/setup_env.sh` 创建） |
-| 上游源码 | `upstream/Qwen-Agent`，commit `31a4d36`（由 `scripts/clone_upstream.sh` 拉取，已 gitignore） |
-| 模型服务 | MiniMax OpenAI 兼容端点 `https://api.minimaxi.com/v1`，模型 `MiniMax-M3.1-Flash` |
-| 密钥 | 环境变量 `MINIMAX_API_KEY`；未设置时回退 `ANTHROPIC_AUTH_TOKEN`（见 `.env.example`） |
-| PyPI 源 | 默认走阿里云镜像（本机到 pypi.org 直连很慢，索引页 30s+） |
+| 把「一次只办一件事」从 prompt 文字禁令挪到**工具层机制约束** | 过度执行类任务 **0/15 → 9/9**，Fisher 检验 **p = 1e-6** |
+| 整体 pass@1 | **0.925 → 0.980**（批次间 σ=0.015，即 **3.7σ**） |
+| 定位并修复上游框架缺陷 | **5 处协议/依赖缺陷**（其中 1 处是原生 function calling 直接 400） |
 
-**网络前提**（本机实测）：GitHub 的 git 协议被重置，因此拉源码走 `gitclone.com` 镜像 / `gh-proxy.com` 转发 / `codeload` tarball 三级兜底，脚本已内置。
+![主结果](results_summary/fig1_main.svg)
 
 ---
 
-## 目录
+## 1. 问题
 
-```
-agent/
-├── README.md                     # 本文件
-├── requirements.txt              # 本项目额外依赖（PyYAML / requests / numpy 等）
-├── .env.example                  # 密钥变量示例
-├── .gitignore
-├── configs/
-│   └── model.yaml                # 模型 / 端点 / 场景开关配置
-├── src/qwen_agent_demo/          # ① 演示层：证明底座可信
-│   ├── config.py                 # YAML 配置 -> dataclass，密钥取值链
-│   ├── model_factory.py          # 装配 LLM + 协议级冒烟 + 带重试的文本对话
-│   ├── tools.py                  # 两个本地确定性工具（sum_numbers / text_stats）
-│   └── demo.py                   # 三个演示场景入口
-├── src/qwen_agent_bench/         # ② 评测床：自建，零新增依赖
-│   ├── domain/
-│   │   ├── db.py                 # 模拟数据库 + 确定性状态哈希
-│   │   ├── db.json               # 初始数据（5 客户 / 5 设备 / 库存 / 预置工单）
-│   │   ├── tools.py              # 8 个域工具（4 读 4 写）
-│   │   ├── policy.md             # 原始业务策略（基线变体使用）
-│   │   ├── policy_digest.md      # 结构化策略摘要（按 section 可裁剪）
-│   │   ├── tasks.json            # 6 条中文任务（含越权 / 诱导 / 信息保护）
-│   │   └── loader.py             # 任务与策略加载
-│   ├── evaluator.py              # DB 终态判分 + NL 断言判定 + 失败归因
-│   ├── variants.py               # A 基线 / B 上下文工程 / C +反思 三个变体
-│   ├── runner.py                 # 脚本化用户 + 会话循环 + 判分
-│   └── bench.py                  # 命令行入口（批量跑 + pass^k + 报告）
-├── tests/                        # stdlib unittest（47 项，全部不调模型）
-│   ├── test_config.py
-│   ├── test_tools.py
-│   └── test_bench.py
-├── scripts/
-│   ├── clone_upstream.sh         # 拉取上游源码（三级镜像兜底）
-│   ├── setup_env.sh              # 建 venv + 装依赖
-│   ├── verify.sh                 # 一键复现验证
-│   ├── run_demo.sh               # 跑演示
-│   └── run_bench.sh              # 跑评测床
-├── docs/
-│   ├── 调研报告-选型.md          # 框架选型 + 本机网络/环境实测
-│   ├── 评测床设计.md             # 自建评测床的规格与实施记录
-│   ├── 评测与调优方法论.md        # Reflexion / OpenJudge / Claw-Eval 方法与步骤
-│   └── 安全管控方法论.md          # 腾讯朱雀 A.I.G + Agent 三道关
-└── upstream/Qwen-Agent/          # 上游源码（gitignore）
-```
+调 agent 时有两件事人人都在做、却几乎没人**量化**过**：
 
----
+1. **上下文怎么组织** —— 规则全塞进 prompt？按场景裁剪？写成要点？加"红线"？
+2. **agent 越权怎么办** —— 靠 prompt 里写"不许做 X"？
 
-## 命令
+直觉上这两件事都很容易做，**但没人验证过哪种真的有效**。常见的评测做法是"跑一遍看总体分"，
+而总体分**噪声极大**：本项目实测同一配置同一规则集的**批次间 pass^3 极差达 0.118**——
+足以把大多数"改进"淹没在噪声里。
 
-### 一键复现
+## 2. 做了什么
+
+### ① 自建评测床（`src/qwen_agent_bench/`，**零新增依赖**，只用上游框架 + 标准库）
+
+判分借鉴 [τ²-bench](https://github.com/sierra-research/tau2-bench) 的思路：
+**参考轨迹回放到干净 DB 得到目标终态**，agent 的写操作发生在同一份 DB 上得到预测终态，
+比对状态哈希 —— 等价终态即通过，不要求调用序列一致。
+
+- 中文电信客服域：9 个工具、16 条规则（单一事实源）、17 条任务
+- 奖励 = **DB 维度**（确定性）× **NL 断言**（LLM judge）
+- **判分器本身被验证过**：变异测试 9/9 全拒；NL judge 与确定性正则交叉核验 **255/255 一致**
+
+### ② 把「上下文工程」拆成**正交开关**再测
+
+之前 `policy.md`（手写长文）与 `policy_digest.md`（手写摘要）两份内容并不一致，
+"上下文工程的收益"里混着"人工摘要多写了什么"的偏置。收敛到**单一事实源**
+（`domain/policy_rules.yaml`）+ 双渲染器后：
+
+| 子机制 | 结论 | 效应量 |
+|---|---|---|
+| **要点化**（规则写成要点而非长段落） | ✅ 有效 | +0.117（2.8σ） |
+| **按场景相关性裁剪** | ❌ **有害** —— 会把跨场景的隐性约束一起裁掉 | −0.235 |
+| **红线保底**（绝对不能违反的规则无条件保留） | ✅ 必要 | — |
+| **全量注入**（完全不裁） | ❌ 不如裁剪 —— 不相关规则造成噪声干扰 | — |
+
+> **配方：裁剪到场景相关 + 红线保底 + 判据要点化。**
+> 「给最少够用的上下文，但把绝对不能违反的规则无条件保留。」
+
+### ③ 把约束从 prompt 挪到**工具层**
+
+最反直觉的一条发现：
+
+| 手段 | 落点 | 实测 |
+|---|---|---|
+| 文字禁令「一次只办一件事」 | prompt | agent 读成「**别多做事**」→ 连必要的查询都不做 → **该做不做** |
+| **机制约束**（工具层拦截） | tool | agent **做该做的、做不了不该做的** → 过度执行 **0/15 → 9/9** |
+
+> **用禁止性规则压制越界，会让模型畏首畏尾；要修"做多了"，应收紧可行域（机制约束），不是增加禁令（文字约束）。**
+
+![逐任务通过率](results_summary/fig3_per_task.svg)
+
+## 3. 方法论：把噪声也算进结论
+
+![批次间方差](results_summary/fig2_variance.svg)
+
+同一配置、同一规则集，多个独立批次：
+
+- **pass@1 的批次间 σ ≈ 0.015；pass^3 的 σ ≈ 0.044**（pass^3 对边界任务的单次翻转极敏感）
+- 因此效应量判定以 **pass@1 + 配对检验**为主，pass^3 只作参考
+- 每个配置至少 3 个独立批次，合并后按任务算 pass^3
+
+**这套规范是在踩过 11 个坑之后才定下来的**，其中几个如果没查出来，结论会直接反过来：
+
+| 坑 | 后果 |
+|---|---|
+| 「保留」与「置顶」两个开关混用 | 得出「裁剪有害」的**假结论**（其实是红线被裁了） |
+| 并行跑触发端点限流，**中断被当成任务失败** | 所有变体从 ~0.9 掉到 ~0.55，差点得出完全相反的结论 |
+| 判分阈值（0.05）小于**实验分辨率**（1/17=0.059） | 标准从一开始就不可达 |
+| gold 没有策略依据 | 判了"策略没规定的事" |
+
+完整台账见 [`docs/审计与评判标准.md`](docs/审计与评判标准.md)。
+
+## 4. 怎么复现
 
 ```bash
-# 1) 拉取上游源码
-bash scripts/clone_upstream.sh
-
-# 2) 建环境装依赖
+# 1) 环境（拉上游 + 建 venv + 装依赖）
 bash scripts/setup_env.sh
 
-# 3) 全量验证（源码检查 -> 单元测试 -> 端到端 demo）
-bash scripts/verify.sh
+# 2) 3 分钟看到全貌：环境自检 + 一次真实对话 + 打印已归档的消融结果
+bash scripts/demo.sh
+
+# 3) 完整复现（约 2.5 小时，5 变体 × 17 任务 × 3 次 × 多批次）
+bash scripts/run_bench.sh --variant B_crop_keepredline --variant B_guard --trials 3 --jobs 2
+
+# 4) 从原始结果重新生成汇总与图表（数字可复算）
+.venv/Scripts/python.exe scripts/summarize.py
 ```
 
-### 分步执行
+**需要**：Python 3.12 + 一个 OpenAI 兼容端点（本项目用 MiniMax；`scripts/*.sh` 会自动从
+`~/.claude/settings.json` 读取已配置的 key，也可设 `MINIMAX_API_KEY`）。
 
-```bash
-# 单元测试
-.venv/Scripts/python.exe -m unittest discover -s tests -v
+**数字可复算**：[`results_summary/汇总.md`](results_summary/汇总.md) 由 `scripts/summarize.py`
+从原始结果生成，批次分组显式写死并注明对应的代码版本（不同代码版本的数据不可合并）。
 
-# 端到端 demo（需要 PYTHONPATH 指向 src）
-export PYTHONPATH=src
-export PYTHONIOENCODING=utf-8
-.venv/Scripts/python.exe -m qwen_agent_demo.demo
-```
+## 5. 定位并修复的上游缺陷（`src/qwen_agent_demo/model_factory.py`）
 
-Windows PowerShell 下：
-
-```powershell
-$env:PYTHONPATH="src"
-$env:PYTHONIOENCODING="utf-8"
-.\.venv\Scripts\python.exe -m qwen_agent_demo.demo
-```
-
-### 切换模型
-
-改 `configs/model.yaml` 的 `model` / `base_url` 即可，已验证可用的模型名见 `https://api.minimaxi.com/v1/models`。
-任何 OpenAI 兼容服务都能接（上游 `TextChatAtOAI` 原生读 `cfg['base_url']`）。
-
----
-
-## ② 自建评测床（`src/qwen_agent_bench`）
-
-一个**中文电信客服**域的 agent 评测床，**零新增依赖**（只用已装的 Qwen-Agent + 标准库）。
-规格与实施记录见 `docs/评测床设计.md`。
-
-```bash
-# 全量：3 个变体 × 6 个任务 × 1 次
-bash scripts/run_bench.sh
-
-# 只跑基线 / 跑 3 次取 Pass^3
-bash scripts/run_bench.sh --variant A_baseline
-bash scripts/run_bench.sh --trials 3
-```
-
-**判分方式**（借鉴 τ²-bench）：参考轨迹回放到干净 DB 得到**目标终态**，agent 的写操作发生在同一份 DB 上得到**预测终态**，比对状态哈希——等价终态即通过，不要求调用序列一致。奖励 = DB 维度 × NL 断言维度。
-
-**五个消融变体**（阶梯式，每级只加一个东西）：
-
-| 变体 | 上下文 | 工具描述 | 额外机制 | function calling |
-|---|---|---|---|---|
-| `A_baseline` | 原始 policy 全文 | 默认 | — | 上游默认（Nous 文本式） |
-| `A_native` | 原始 policy 全文 | 默认 | — | **原生**（`use_raw_api`） |
-| `B_context` | 结构化摘要（红线前置 + 按任务裁剪） | 改写（何时该用/何时不该用/必填参数） | — | 文本式 |
-| `B_native` | 同 B | 同 B | — | 原生 |
-| `C_reflection` | 同 B | 同 B | 单向反思（只问"还没做什么"） | 文本式 |
-| `D_guarded` | 同 B + **动作边界**（置于 system 最前） | 同 B + **按工具定制的调用前置条件** | 减法机制 | 文本式 |
-| `E_guarded_reflect` | 同 D | 同 D | 减法机制 + **双向反思**（同时问"该做而没做"和"不该做而做了"） | 文本式 |
-
-**任务集 17 条**（原 6 条回归基线 + 11 条有区分度的）：标准受理 / 欠费 / 过保换机 / 越权退款 / 信息保护 / 合规退款 / 重复报修不重复建单 / **换机需选对同型号库存** / **退款边界 50 元可办·51 元不可办** / 用户谎称在保 / 同名客户需问手机号 / 欠费账户要求换机 / 声称授权仍不得代查 / 多诉求不得越权 / 手机号报错后自恢复 / **多现象分别建单**。
-正向写 gold 8 条 / 不写库 9 条 —— 避免"什么都不做也能满分"。
-
-**核心指标**：pass@1 / pass^k（`C(success,k)/C(trials,k)`）/ DB 维度分 / NL 维度分 / 工具调用数（**看中位数**）/ 动作级失败归因。
-
-**最终结果**（`docs/实验报告-v9.md`，9 个独立批次 / 459 次运行 / 0 中断；策略来自**单一事实源** `domain/policy_rules.yaml`）：
-
-| 配置 | 批次 | pass@1 | pass^3 | **H9（过度执行任务）** |
-|---|---|---|---|---|
-| `B_crop_keepredline`（裁剪 + 保红线） | 5 | 0.925 | 0.899 | **0/15** |
-| **`B_guard`**（同策略 + **工具层机制约束**） | 4 | **0.971** | 0.920 | **9/12** |
-
-Δpass@1 = **+0.045**（批次间 σ=0.015 → **3σ**）；**H9：0/15 → 9/12，Fisher p = 0.00005**；其余 16 条任务无一变差。
-
-**核心结论**：
-1. **机制约束（工具层）显著有效** —— 把「一次只办一件事」从 prompt 的文字禁令挪到工具层拦截
-   > 文字禁令会被 agent 读成「别多做事」（连必要查询都不做）；**机制约束**让它做该做的、做不了不该做的
-2. **上下文工程的配方 = 裁剪到场景相关 + 红线保底 + 判据要点化**
-   > 裁剪本身不坏，坏的是它把**跨场景的隐性约束**一起裁掉；全量注入也不行（噪声干扰）
-3. **被截断的规则比没有这条规则更危险** —— 截断版只剩退款权限前半句，模型就以为任何原因都能退（多退款 ×6）。生产上对应「部分生效的策略配置」导致权限放大
-
-> 已知局限：只有一个域、一个模型，**用户是脚本化的**，无外部分数对照——因此**只做组内消融对比，不宣称绝对水平**。
-> 批次间噪声实测：pass@1 σ≈0.018、**pass^3 σ≈0.043**（pass^3 对边界任务的单次翻转更敏感）→ 效应量判定应以 pass@1 + 配对检验为主。
-
----
-
-## demo 覆盖的场景
-
-| 场景 | 上游 API | 验证目标 |
+| # | 缺陷 | 影响 |
 |---|---|---|
-| Function Calling | `Assistant(function_list=[...])` | 模型能正确发起 `tool_calls`，本地工具能正确执行并回填 |
-| ReAct Chat | `ReActChat(function_list=[...])` | 多轮推理 + 工具调用链路 |
-| 多 Agent 编排 | `GroupChat(agents={...})` | 多角色 agent 自动路由 |
-| 协议冒烟 | 直接打 `/v1/chat/completions` 带 `tools` | 底层协议与工具调用的回归基线（不依赖框架） |
+| 1 | 原生 function calling 的工具结果用 `id` 而非 OpenAI 规范的 **`tool_call_id`** | MiniMax 严格校验 → 直接 `400 tool result's tool id not found` |
+| 2 | `setup.py` 漏声明 `numpy`/`soundfile`/`ipykernel`/`regex`/`tqdm` | `import qwen_agent` 直接失败 |
+| 3 | `reasoning_content` 存在时 `_chat_no_stream` 丢弃 `tool_calls` | 工具调用被静默吞掉 |
+| 4 | `yield response + output` 反复吐出累积消息 | 工具调用计数虚高 |
+| 5 | `extra.function_id` 跨轮重号 | tool_call 与 tool 消息 id 错位 |
 
-实际运行输出：
+均在本仓库的封装层修复，**不改动上游源码**。
+
+## 6. 局限（请一并读）
+
+1. **1 个模型 / 1 个域 / 17 个任务** → 结论**不可外推**（换模型、换域是否成立**尚未验证**）
+2. **用户是脚本化的**，不测"应对混乱用户"
+3. **无外部分数对照**（未跑 τ²-bench / Claw-Eval 官方基线）→ 只做组内消融，不宣称绝对水平
+4. **任务是自写的**；判分与 agent 实现完全解耦，且经过多轮回审
+5. 机制约束依赖**业务关键词表**，换域需重写 —— 这是方法的适用边界
+6. NL 断言维度区分度弱，有效判分主要靠 DB 维度
+
+## 7. 目录
 
 ```
-模型: MiniMax-M3.1-Flash
-端点: https://api.minimaxi.com/v1
-协议冒烟: 端点工具调用正常 (tool=add)
-
-===== 场景一：Function Calling =====
-  -> 调用工具 sum_numbers({"numbers": [12, 30, 8]})
-  <- sum_numbers 返回: {"count": 3, "sum": 50.0}
-  最终回答: 12、30、8 这三个数的和是 50。
-
-===== 场景二：ReAct Chat =====
-  -> (ReAct 文本动作) text_stats
-  最终回答: 字符数：11，词数：2，行数：2。
-
-===== 场景三：多 Agent 编排 =====
-  -> 调用工具 sum_numbers({"numbers": [5, 6, 7]})
-  <- sum_numbers 返回: {"count": 3, "sum": 18.0}
-  最终回答: 18
-
-全部场景执行完毕。
+src/qwen_agent_demo/     演示层：接上游 + 协议兼容补丁（工具调用 / ReAct / 多 Agent）
+src/qwen_agent_bench/    评测床：域、工具、规则、任务、判分、变体、运行器
+docs/                    选型调研、评测床设计、审计与评判标准、9 份实验报告、2 份方法论
+scripts/                 clone / setup / verify / demo / run_bench / summarize / analyze
+results_summary/         可复算的汇总与图表（由 summarize.py 生成）
+tests/                   85 项单元测试，全部不调用模型
 ```
 
----
+## 8. 文档索引
 
-## 上游踩坑（已绕过，详见 `docs/调研报告-选型.md` 第 8 节）
-
-1. **上游 `setup.py` 漏声明 `numpy` / `soundfile` / `ipykernel` / `regex` / `tqdm`**，但这些是模块级 import，不装则 `import qwen_agent` 直接失败 —— 已补进 `requirements.txt`。
-2. **`reasoning_content` 会吞掉 `tool_calls`**：上游 `_chat_no_stream` 在响应含 `reasoning_content` 时只返回 content，丢掉工具调用；MiniMax 恒返回该字段。**保持流式**（上游默认即是）可规避。
-3. **流式返回是累积式**：assistant 内容每轮是全文，`function_call.arguments` 是分片增量 —— `demo.py` 已做合并去重。
-4. **`GroupChat` 成员工具必须用 `@register_tool` 注册**，否则 `Tool xxx is not registered`。
-
----
-
-## 已知限制
-
-1. **未做 RAG 场景**：Qwen-Agent 的 RAG 默认依赖 dashscope embedding（需另购 key）或 HuggingFace 本地 embedding（`huggingface.co` 在本机未验证可达）。后续接入方式见 `docs/调研报告-选型.md`。
-2. **未做评测/调优/安全管控实现**：按约定只出方法与原理，见 `docs/评测与调优方法论.md`、`docs/安全管控方法论.md`。
-3. **上游源码不入库**：`upstream/` 已 gitignore，需要时执行 `bash scripts/clone_upstream.sh` 重新拉取。
-4. **密钥不落盘**：真实 key 只从环境变量读取，仓库内只有 `.env.example`。
-5. **上游 `code_interpreter` 工具未挂载**：该工具可执行任意代码，生产化前需沙箱化（见 `docs/安全管控方法论.md` 第 5 节风险清单）。
-6. **模型输出非确定性**：同一问题多次运行结果可能不同，做回归基线时建议按 Claw-Eval 的 Pass^3 口径连跑 3 次。
+| 文档 | 内容 |
+|---|---|
+| [`docs/调研报告-选型.md`](docs/调研报告-选型.md) | 高星框架对比、网络与环境实测、接入验证 |
+| [`docs/评测床设计.md`](docs/评测床设计.md) | 评测床规格 + 完整实施过程与踩坑 |
+| [`docs/审计与评判标准.md`](docs/审计与评判标准.md) | **每步开工前的回审清单、11 项评判标准、方差分析** |
+| [`docs/实验报告-v9.md`](docs/实验报告-v9.md) | **最终结果** |
+| [`docs/评测与调优方法论.md`](docs/评测与调优方法论.md) | Reflexion / OpenJudge / Claw-Eval 的方法与步骤 |
+| [`docs/安全管控方法论.md`](docs/安全管控方法论.md) | 腾讯朱雀 A.I.G、Agent 三道关、安全作为评测维度 |

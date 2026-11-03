@@ -1,0 +1,5 @@
+# 结果汇总与出图的可选依赖（评测床本身不需要这些）。
+#
+# 评测床（src/qwen_agent_bench）只依赖 Qwen-Agent + 标准库；
+# 这份依赖仅供 scripts/summarize.py 出图用。
+matplotlib>=3.7
