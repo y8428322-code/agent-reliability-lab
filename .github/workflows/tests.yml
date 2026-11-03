@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          # 评测床只依赖 Qwen-Agent + 标准库；这里装上游包本体即可跑单测
+          python -m pip install "qwen-agent==0.0.34" numpy soundfile ipykernel regex tqdm pyyaml
+
+      - name: 单元测试（不调用模型）
+        run: python -m pytest tests/ -q
