@@ -39,5 +39,37 @@
 <text x="404.0" y="96.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.941</text>
 <rect x="332" y="330" width="13" height="13" fill="#e8802f" rx="2"/>
 <text x="350" y="341" font-size="12.5" fill="#3a3a44">B_guard  σ=0.048</text>
+<rect x="78.0" y="149.5" width="652.0" height="163.2" fill="#2e9e5b" opacity="0.13"/>
+<line x1="78" y1="231.1" x2="730" y2="231.1" stroke="#2e9e5b" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="153.2" cy="312.7" r="6" fill="#2e9e5b" stroke="#ffffff" stroke-width="1.6"/>
+<text x="153.2" y="300.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.647</text>
+<circle cx="278.6" cy="149.5" r="6" fill="#2e9e5b" stroke="#ffffff" stroke-width="1.6"/>
+<text x="278.6" y="137.5" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.882</text>
+<rect x="498" y="330" width="13" height="13" fill="#2e9e5b" rx="2"/>
+<text x="516" y="341" font-size="12.5" fill="#3a3a44">B_crop_redline  σ=0.118</text>
+<rect x="78.0" y="149.5" width="652.0" height="40.8" fill="#a05ad6" opacity="0.13"/>
+<line x1="78" y1="169.9" x2="730" y2="169.9" stroke="#a05ad6" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="153.2" cy="190.3" r="6" fill="#a05ad6" stroke="#ffffff" stroke-width="1.6"/>
+<text x="153.2" y="178.3" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.824</text>
+<circle cx="278.6" cy="149.5" r="6" fill="#a05ad6" stroke="#ffffff" stroke-width="1.6"/>
+<text x="278.6" y="137.5" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.882</text>
+<rect x="720" y="330" width="13" height="13" fill="#a05ad6" rx="2"/>
+<text x="738" y="341" font-size="12.5" fill="#3a3a44">B_guard_redline  σ=0.029</text>
+<rect x="78.0" y="108.7" width="652.0" height="1.0" fill="#2f6df6" opacity="0.13"/>
+<line x1="78" y1="108.7" x2="730" y2="108.7" stroke="#2f6df6" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="153.2" cy="108.7" r="6" fill="#2f6df6" stroke="#ffffff" stroke-width="1.6"/>
+<text x="153.2" y="96.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.941</text>
+<circle cx="278.6" cy="108.7" r="6" fill="#2f6df6" stroke="#ffffff" stroke-width="1.6"/>
+<text x="278.6" y="96.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.941</text>
+<rect x="950" y="330" width="13" height="13" fill="#2f6df6" rx="2"/>
+<text x="968" y="341" font-size="12.5" fill="#3a3a44">B_crop_v2  σ=0.000</text>
+<rect x="78.0" y="108.7" width="652.0" height="1.0" fill="#e8802f" opacity="0.13"/>
+<line x1="78" y1="108.7" x2="730" y2="108.7" stroke="#e8802f" stroke-width="2" stroke-dasharray="5 3"/>
+<circle cx="153.2" cy="108.7" r="6" fill="#e8802f" stroke="#ffffff" stroke-width="1.6"/>
+<text x="153.2" y="96.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.941</text>
+<circle cx="278.6" cy="108.7" r="6" fill="#e8802f" stroke="#ffffff" stroke-width="1.6"/>
+<text x="278.6" y="96.7" font-size="10.5" fill="#6b6b76" text-anchor="middle">0.941</text>
+<rect x="1132" y="330" width="13" height="13" fill="#e8802f" rx="2"/>
+<text x="1150" y="341" font-size="12.5" fill="#3a3a44">B_guard_v2  σ=0.000</text>
 <text x="380" y="352" font-size="11.5" fill="#8a8a95" text-anchor="middle">虚线=批次均值，浅色带=±σ。σ(pass^3) 明显大于 σ(pass@1) → 效应量判定应以 pass@1 + 配对检验为主</text>
 </svg>

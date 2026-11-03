@@ -62,19 +62,27 @@ GROUPS: List[Dict[str, Any]] = [
     },
     {
         "key": "crop_redline",
-        "label": "B_crop_redline（裁剪 + 保红线，新规则集，无机制约束）",
-        "desc": "current 规则集（跨场景通用约束提为红线 + 补规则缺口），无机制约束；与 keepredline 只差规则集",
-        "files": [
-            "bench_B_crop_redline_20261103_102226.json",
-        ],
+        "label": "B_crop_redline（裁剪 + 保红线，规则集 v1，无机制约束）",
+        "desc": "规则集 v1（措辞有洞，会诱发「预告式拖延」），无机制约束",
+        "files": sorted([p.name for p in (RESULTS).glob("bench_B_crop_redline_20261103_*.json")]),
     },
     {
         "key": "guard_redline",
-        "label": "B_guard_redline（同上 + 工具层机制约束）",
-        "desc": "current 规则集 + 机制约束；与 B_guard 只差规则集",
-        "files": [
-            "bench_B_guard_redline_20261103_102226.json",
-        ],
+        "label": "B_guard_redline（规则集 v1 + 机制约束）",
+        "desc": "规则集 v1 + 机制约束；与 B_guard 只差规则集",
+        "files": sorted([p.name for p in (RESULTS).glob("bench_B_guard_redline_20261103_*.json")]),
+    },
+    {
+        "key": "crop_v2",
+        "label": "B_crop_v2（裁剪 + 保红线，规则集 v2，无机制约束）",
+        "desc": "规则集 v2（修正 v1 措辞），无机制约束；与 B_crop_keepredline 只差规则集",
+        "files": sorted([p.name for p in (RESULTS).glob("bench_B_crop_v2_20261103_*.json")]),
+    },
+    {
+        "key": "guard_v2",
+        "label": "B_guard_v2（规则集 v2 + 机制约束）",
+        "desc": "规则集 v2 + 机制约束；与 B_guard 只差规则集",
+        "files": sorted([p.name for p in (RESULTS).glob("bench_B_guard_v2_20261103_*.json")]),
     },
 ]
 
