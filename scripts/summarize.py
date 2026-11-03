@@ -53,7 +53,7 @@ GROUPS: List[Dict[str, Any]] = [
     {
         "key": "guard",
         "label": "B_guard（同策略 + 工具层机制约束）",
-        "desc": "3 个独立批次；legacy 规则集；**仅取守卫最终修复版（bb1e081 之后）**，早期批次守卫逻辑不同，不可合并",
+        "desc": "3 个独立批次；legacy 规则集；**仅取守卫逻辑定稿后的批次（bb1e081 之后）**，早期批次守卫逻辑不同，不可合并",
         "files": [
             "bench_B_guard_20261102_190206.json",
             "bench_B_guard_20261102_193810.json",
@@ -63,7 +63,7 @@ GROUPS: List[Dict[str, Any]] = [
     {
         "key": "crop_redline",
         "label": "B_crop_redline（裁剪 + 保红线，规则集 v1，无机制约束）",
-        "desc": "规则集 v1（措辞有洞，会诱发「预告式拖延」），无机制约束",
+        "desc": "规则集 v1（措辞边界模糊的版本），无机制约束",
         "files": sorted([p.name for p in (RESULTS).glob("bench_B_crop_redline_20261103_*.json")]),
     },
     {
@@ -75,7 +75,7 @@ GROUPS: List[Dict[str, Any]] = [
     {
         "key": "crop_v2",
         "label": "B_crop_v2（裁剪 + 保红线，规则集 v2，无机制约束）",
-        "desc": "规则集 v2（修正 v1 措辞），无机制约束；与 B_crop_keepredline 只差规则集",
+        "desc": "规则集 v2（措辞边界清晰的版本），无机制约束；与 B_crop_keepredline 只差规则集",
         "files": sorted([p.name for p in (RESULTS).glob("bench_B_crop_v2_20261103_*.json")]),
     },
     {

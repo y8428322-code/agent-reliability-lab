@@ -38,7 +38,7 @@ VARIANTS = [
     "A_native",           # 同上，但走原生 function calling
     "B_crop",             # **只裁剪**（按场景），仍是长段落
     "B_points",           # **只要点化**（全量规则要点化），不裁剪、不红线前置
-    "B_crop_points",      # 旧裁剪：严格按场景裁，连红线一起裁（v6 的做法）
+    "B_crop_points",      # 旧裁剪：严格按场景裁，连红线一起裁（见 docs/实验报告-v6.md）
     "B_crop_keepredline", # 中间裁剪：红线不裁、通用约束裁
     "B_crop_safe",        # 新裁剪：按规则强度分层，红线与通用约束都不裁
     "B_guard",            # 同 B_crop_keepredline + **机制约束**（工具层：一回合只准一次写操作）
@@ -59,7 +59,7 @@ VARIANTS = [
 # 变体 -> 规则集文件。未列出的变体一律用 legacy，以便与历史批次可比。
 #   legacy            「跨场景通用约束提为红线」之前的历史版本
 #   policy_rules_v1   第一版改动：R15 提为红线 + R5/R11 补动作项 + 新增 R18
-#   policy_rules      当前版：修正 v1 的措辞（见 docs/实验报告-v10.md）
+#   policy_rules      当前版：R15/R18 划清措辞边界（见 docs/实验报告-v9.md）
 VARIANT_RULESET = {
     "B_crop_redline": "policy_rules_v1.yaml",
     "B_guard_redline": "policy_rules_v1.yaml",
